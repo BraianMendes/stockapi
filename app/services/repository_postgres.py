@@ -1,0 +1,30 @@
+from typing import Optional
+from sqlalchemy.orm import Session
+from datetime import datetime
+from .aggregator import StockRepository
+from ..db.models import StockPurchase
+
+
+class PostgresStockRepository(StockRepository):
+    """
+    Postgres-backed repository for purchased amounts.
+    """
+
+    def __init__(self, session_factory) -> None:
+        self.session_factory = session_factory
+
+    def get_purchased_amount(self, symbol: str) -> int:
+        with self.session_factory() as db:  # type: Session
+            row: Optional[StockPurchase] = db.get(StockPurchase, symbol)
+            return int(row.amount) if row else 0
+
+    def set_purchased_amount(self, symbol: str, amount: int) -> None:
+        with self.session_factory() as db:  # type: Session
+            row: Optional[StockPurchase] = db.get(StockPurchase, symbol)
+            if row:
+                row.amount = int(amount)
+                row.updated_at = datetime.utcnow()
+            else:
+                row = StockPurchase(symbol=symbol, amount=int(amount), updated_at=datetime.utcnow())
+                db.add(row)
+            db.commit()

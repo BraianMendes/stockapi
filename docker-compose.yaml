@@ -1,6 +1,10 @@
+version: "3.9"
+
 services:
   api:
+    build: .
     image: stocks-api
+    container_name: stocks-api
     ports:
       - "8000:8000"
     env_file:
@@ -8,3 +12,37 @@ services:
     environment:
       LOG_LEVEL: DEBUG
       DEBUG_ENV: "true"
+      REDIS_URL: redis://redis:6379/0
+      CACHE_TTL_SECONDS: 300
+      DATABASE_URL: postgresql+psycopg2://stocks:stocks@postgres:5432/stocks
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: stocks-postgres
+    environment:
+      POSTGRES_DB: stocks
+      POSTGRES_USER: stocks
+      POSTGRES_PASSWORD: stocks
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U stocks -d stocks -h 127.0.0.1"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    container_name: stocks-redis
+    ports:
+      - "6379:6379"
+
+volumes:
+  pgdata:
