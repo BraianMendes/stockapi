@@ -1,4 +1,3 @@
-# app/routers/stock.py
 from typing import Dict, Optional
 from datetime import date
 from fastapi import APIRouter, HTTPException, Query, status
@@ -33,7 +32,7 @@ def get_stock(symbol: str, request_date: Optional[date] = Query(None, descriptio
 
 
 @router.post("/{symbol}", status_code=status.HTTP_201_CREATED, summary="Add purchased amount")
-def add_purchase(symbol: str, body: PurchaseBody) -> Dict[str, str]:
+def add_purchase(symbol: str, body: PurchaseBody):
     """
     Persist purchased amount for a symbol and invalidate aggregator cache for this symbol.
     """
@@ -41,6 +40,7 @@ def add_purchase(symbol: str, body: PurchaseBody) -> Dict[str, str]:
         sym = symbol.strip().upper()
         _repo.set_purchased_amount(sym, body.amount)
         _invalidate_symbol_cache(sym)
+        # Resposta simples, coerente com o whiteboard, sem tipagem fixa para facilitar evolução em dev
         return {"message": f"{body.amount} units of stock {sym} were added to your stock record"}
     except Exception as e:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
@@ -49,7 +49,7 @@ def add_purchase(symbol: str, body: PurchaseBody) -> Dict[str, str]:
 def _invalidate_symbol_cache(symbol: str) -> None:
     """
     Remove all cached entries for this symbol (all dates) when using Redis.
-    In-memory cache has no pattern delete; that's fine for local dev.
+    In-memory cache não suporta pattern delete (limitação aceitável em dev).
     """
     cfg = EnvConfig()
     redis_url = cfg.get_str("REDIS_URL")

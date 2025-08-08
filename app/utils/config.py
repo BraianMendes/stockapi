@@ -1,4 +1,3 @@
-# app/utils/config.py
 import os
 from typing import Optional, Protocol
 

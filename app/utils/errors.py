@@ -1,4 +1,3 @@
-# app/utils/errors.py
 class ExternalServiceError(RuntimeError):
     """
     Base error for external API or data source failures.

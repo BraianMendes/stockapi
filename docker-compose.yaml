@@ -1,9 +1,8 @@
-version: "3.9"
-
 services:
   api:
     build: .
     image: stocks-api
+    pull_policy: never
     container_name: stocks-api
     ports:
       - "8000:8000"
@@ -11,6 +10,8 @@ services:
       - .env
     environment:
       LOG_LEVEL: DEBUG
+      LOG_FORMAT: plain
+      LOG_UTC: "true"
       DEBUG_ENV: "true"
       REDIS_URL: redis://redis:6379/0
       CACHE_TTL_SECONDS: 300

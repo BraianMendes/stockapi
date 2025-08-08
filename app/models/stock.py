@@ -9,7 +9,9 @@ class MarketCap(BaseModel):
 
 
 class Competitor(BaseModel):
+    symbol: Optional[str] = Field(None, description="Competitor ticker symbol")
     name: str = Field(..., description="Competitor company name")
+    url: Optional[str] = Field(None, description="Competitor MarketWatch URL")
     market_cap: Optional[MarketCap] = Field(None, description="Competitor market cap")
 
 
@@ -32,7 +34,7 @@ class Stock(BaseModel):
     status: str = Field(..., description="Overall status")
     purchased_amount: int = Field(..., description="Purchased amount")
     purchased_status: str = Field(..., description="Purchased or not_purchased")
-    request_data: date = Field(..., description="Request date (YYYY-MM-DD)")
+    request_date: date = Field(..., description="Request date (YYYY-MM-DD)")
     company_code: str = Field(..., description="Ticker symbol")
     company_name: str = Field(..., description="Company name")
     stock_values: StockValues = Field(..., description="OHLC object")

@@ -1,4 +1,3 @@
-# app/utils/parsing.py
 from typing import Optional
 from .value_objects import IsoDate, Symbol, Percentage, Money
 

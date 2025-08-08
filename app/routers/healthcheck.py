@@ -8,6 +8,7 @@ router = APIRouter(tags=["Health"])
 
 cfg = EnvConfig()
 polygon_svc = PolygonService()
+# Reutiliza uma instância, mas permite togglar cookie por chamada
 mw_svc = MarketWatchService()
 
 
@@ -43,9 +44,11 @@ def check_marketwatch() -> str:
     """
     Verify MarketWatch scraping by fetching overview for AAPL.
     Accept partial responses as healthy enough for readiness.
+    Estratégia de cookie: tenta sem cookie primeiro; se bloqueado (401/403), tenta com cookie do env.
     """
+    # 1) Tenta sem cookie (para detectar bloqueios rapidamente)
     try:
-        data = mw_svc.get_overview("AAPL")
+        data = mw_svc.get_overview("AAPL", use_cookie=False)
         perf = data.get("performance") or {}
         competitors = data.get("competitors") or []
         has_any_perf = any(perf.get(k) is not None for k in ("five_days", "one_month", "three_months", "year_to_date", "one_year"))
@@ -53,7 +56,20 @@ def check_marketwatch() -> str:
             return "ok"
         return "ok_basic"
     except ScraperError as e:
-        return f"error:{str(e)[:60]}"
+        msg = str(e)
+        # 2) Se bloqueado, tenta novamente com cookie
+        if msg.startswith("blocked:"):
+            try:
+                data = mw_svc.get_overview("AAPL", use_cookie=True)
+                perf = data.get("performance") or {}
+                competitors = data.get("competitors") or []
+                has_any_perf = any(perf.get(k) is not None for k in ("five_days", "one_month", "three_months", "year_to_date", "one_year"))
+                if has_any_perf or len(competitors) > 0:
+                    return "ok"
+                return "ok_basic"
+            except ScraperError as e2:
+                return f"error:{str(e2)[:60]}"
+        return f"error:{msg[:60]}"
     except Exception as e:
         return f"error:{str(e)[:60]}"
 

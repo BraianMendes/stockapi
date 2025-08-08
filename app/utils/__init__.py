@@ -1,4 +1,3 @@
-# app/utils/__init__.py
 from .config import Config, EnvConfig
 from .http import (
     HttpClient,
@@ -15,40 +14,39 @@ from .parsing import (
     parse_percent,
     parse_money,
 )
+from .logger import (
+    configure_logging,
+    get_logger,
+    set_trace_id,
+    clear_trace_id,
+)
 try:
     from .redis_cache import RedisCache
 except Exception:
     RedisCache = None
 
 __all__ = [
-    # Config
     "Config",
     "EnvConfig",
-
-    # HTTP
     "HttpClient",
     "RequestsHttpClient",
     "HttpClientFactory",
     "RetryPolicy",
-
-    # Errors
     "ExternalServiceError",
     "PolygonError",
     "ScraperError",
-
-    # Value Objects
     "IsoDate",
     "Symbol",
     "Percentage",
     "Money",
-
-    # Parsing Helpers
     "to_iso_date",
     "normalize_symbol",
     "parse_float",
     "parse_percent",
     "parse_money",
-
-    # Redis Cache
+    "configure_logging",
+    "get_logger",
+    "set_trace_id",
+    "clear_trace_id",
     "RedisCache",
 ]

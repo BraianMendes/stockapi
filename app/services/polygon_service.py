@@ -40,7 +40,20 @@ class PolygonService:
         headers = {"Authorization": f"Bearer {api_key}"}
         params = {"adjusted": adjusted}
 
-        payload = self.http.get_json(url, headers=headers, params=params, timeout=timeout)
+        # Mapeia erros HTTP para PolygonError coerentes com o whiteboard
+        try:
+            payload = self.http.get_json(url, headers=headers, params=params, timeout=timeout)
+        except Exception as e:
+            msg = str(e).lower()
+            # Heurística simples baseada na mensagem de requests
+            if "401" in msg or "403" in msg:
+                raise PolygonError("unauthorized")
+            if "429" in msg or "too many" in msg:
+                raise PolygonError("rate_limited")
+            if any(code in msg for code in ("500", "502", "503", "504")):
+                raise PolygonError("http_error")
+            raise PolygonError(f"http_error:{str(e)[:80]}")
+
         open_v = payload.get("open")
         high_v = payload.get("high")
         low_v = payload.get("low")

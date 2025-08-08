@@ -5,11 +5,7 @@ from typing import Any, Dict, Optional, Protocol, Union, List
 from datetime import date, datetime, timedelta
 
 from ..models import Stock, StockValues, PerformanceData, Competitor, MarketCap
-from ..utils import EnvConfig, IsoDate, Symbol, RedisCache
-try:
-    from ..utils import RedisCache
-except Exception:
-    RedisCache = None
+from ..utils import EnvConfig, IsoDate, Symbol, RedisCache, ScraperError
 from .polygon_service import PolygonService
 from .marketwatch_service import MarketWatchService
 
@@ -86,7 +82,6 @@ class StockAggregator:
         self.clock = clock or RealClock()
         self.cache_ttl = int(self.cfg.get_int("CACHE_TTL_SECONDS", 300))
 
-        # Prefer explicit cache param; else try Redis; else in-memory
         if cache is not None:
             self.cache = cache
         else:
@@ -106,7 +101,11 @@ class StockAggregator:
             return Stock.model_validate(cached)
 
         ohlc = self.polygon.get_ohlc(sym, req_date_str)
-        mw = self.marketwatch.get_overview(sym)
+
+        try:
+            mw = self.marketwatch.get_overview(sym)
+        except ScraperError:
+            mw = {"company_name": sym, "performance": {}, "competitors": []}
 
         purchased_amount = self._safe_get_amount(sym)
         purchased_status = "purchased" if purchased_amount > 0 else "not_purchased"
@@ -119,7 +118,7 @@ class StockAggregator:
             status=ohlc.get("status", "ok"),
             purchased_amount=int(purchased_amount),
             purchased_status=purchased_status,
-            request_data=self._to_date(req_date_str),
+            request_date=self._to_date(req_date_str),
             company_code=sym,
             company_name=company_name,
             stock_values=StockValues(
@@ -138,25 +137,36 @@ class StockAggregator:
             competitors=self._map_competitors(competitors_raw),
         )
 
-        self.cache.set(cache_key, stock.model_dump(), self.cache_ttl)
+        # Ensure JSON-friendly dict (dates -> strings) for Redis/json
+        self.cache.set(cache_key, stock.model_dump(mode="json"), self.cache_ttl)
         return stock
 
     def _map_competitors(self, items: List[Dict[str, Any]]) -> List[Competitor]:
         result: List[Competitor] = []
         for c in items:
             name = c.get("name")
+            symbol = c.get("symbol")
+            url = c.get("url")
             mc = c.get("market_cap")
             market_cap = None
             if isinstance(mc, dict) and mc.get("currency") and mc.get("value") is not None:
                 market_cap = MarketCap(currency=str(mc["currency"]), value=float(mc["value"]))
-            if name:
-                result.append(Competitor(name=str(name), market_cap=market_cap))
+            label = str(name or symbol or "").strip()
+            if label:
+                result.append(Competitor(name=label, symbol=(symbol or None), url=(url or None), market_cap=market_cap))
         return result
 
     def _resolve_request_date_str(self, d: Union[str, date, None]) -> str:
+        # Se não for informado, usar o último dia útil (evita fins de semana/feriados em dev)
         if d is None:
-            return IsoDate.from_any(date.today()).value
+            return IsoDate.from_any(self._last_business_day()).value
         return IsoDate.from_any(d).value
+
+    def _last_business_day(self, start: Optional[date] = None) -> date:
+        d = (start or date.today()) - timedelta(days=1)
+        while d.weekday() >= 5:
+            d -= timedelta(days=1)
+        return d
 
     def _to_date(self, s: str) -> date:
         return date.fromisoformat(s)

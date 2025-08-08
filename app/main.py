@@ -5,8 +5,10 @@ from dotenv import load_dotenv
 
 from app.routers.stock import router as stock_router
 from app.routers.healthcheck import router as health_router
-
 from app.db.database import init_db
+
+from app.utils import configure_logging, get_logger
+from app.middlewares import RequestLoggingMiddleware
 
 TAGS_METADATA = [
     {
@@ -21,11 +23,18 @@ TAGS_METADATA = [
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    configure_logging()
+    log = get_logger("app.boot")
+    log.info("starting app")
+
     env_path = Path(__file__).resolve().parent.parent / ".env"
     load_dotenv(dotenv_path=env_path, override=False)
 
     init_db()
+    log.info("db initialized")
+
     yield
+    log.info("shutting down app")
 
 app = FastAPI(
     title="Stocks API",
@@ -34,17 +43,17 @@ app = FastAPI(
         "with Redis-based per-stock caching and Postgres persistence for purchases."
     ),
     version="1.0.0",
-    contact={
-        "name": "Stocks API",
-        "url": "http://localhost:8000/docs",
-    },
-    license_info={
-        "name": "MIT",
-    },
+    contact={"name": "Stocks API", "url": "http://localhost:8000/docs"},
+    license_info={"name": "MIT"},
     openapi_tags=TAGS_METADATA,
     docs_url="/docs",
     redoc_url="/redoc",
     lifespan=lifespan,
+)
+
+app.add_middleware(
+    RequestLoggingMiddleware,
+    skip_paths={"/health", "/ready", "/docs", "/redoc", "/openapi.json"},
 )
 
 app.include_router(health_router)

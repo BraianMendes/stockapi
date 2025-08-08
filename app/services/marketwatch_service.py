@@ -1,8 +1,9 @@
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Tuple
 from datetime import timedelta
 import time
 import random
 import re
+import requests
 from bs4 import BeautifulSoup
 from ..utils import (
     HttpClient,
@@ -13,6 +14,7 @@ from ..utils import (
     ScraperError,
     parse_percent,
     parse_money,
+    get_logger,
 )
 
 MARKETWATCH_BASE_URL = "https://www.marketwatch.com/investing/stock"
@@ -57,14 +59,16 @@ class MarketWatchService:
         self.http = http or HttpClientFactory.default()
         self.cfg = config or EnvConfig()
         self.base_url = base_url
+        self.log = get_logger("app.services.marketwatch")
 
-    def get_overview(self, symbol: str) -> Dict[str, Any]:
+    def get_overview(self, symbol: str, *, use_cookie: bool = True) -> Dict[str, Any]:
         """
         Return company_name, performance_data, and competitors for a symbol.
+        Set use_cookie=False to force a request without Cookie header.
         """
         sym = Symbol.of(symbol).value
         url = f"{self.base_url}/{sym.lower()}"
-        headers = self._build_headers()
+        headers = self._build_headers(use_cookie=use_cookie)
         timeout = self.cfg.get_float("HTTP_TIMEOUT", 15.0)
 
         html = self._fetch_html(url, headers=headers, timeout=timeout)
@@ -85,32 +89,61 @@ class MarketWatchService:
 
     def _fetch_html(self, url: str, headers: Dict[str, str], timeout: float) -> str:
         """
-        Fetch HTML with basic jitter to reduce blocking.
+        Fetch HTML with basic jitter to reduce blocking. Wrap HTTP errors as ScraperError.
         """
         jitter_min = self.cfg.get_float("MW_JITTER_MIN", 0.8)
         jitter_max = self.cfg.get_float("MW_JITTER_MAX", 2.2)
         delay = random.uniform(jitter_min, jitter_max)
         time.sleep(delay)
-        resp = self.http.get_json  # placeholder to keep interface parity
+
         session_get = getattr(getattr(self.http, "session", None), "get", None)
-        if callable(session_get):
+        if not callable(session_get):
+            raise ScraperError("http_client_missing_raw_get")
+
+        start = time.perf_counter()
+        try:
             r = session_get(url, headers=headers, timeout=timeout)
             r.raise_for_status()
-            return r.text or ""
-        raise ScraperError("http_client_missing_raw_get")
+            html = r.text or ""
+            elapsed_ms = int((time.perf_counter() - start) * 1000)
+            snippet = (html[:200] or "").encode("ascii", "ignore").decode("ascii")
+            self.log.info(
+                "marketwatch_fetch_ok",
+                extra={"url": url, "status": getattr(r, "status_code", None), "ms": elapsed_ms, "preview": snippet},
+            )
+            return html
+        except requests.HTTPError as e:
+            elapsed_ms = int((time.perf_counter() - start) * 1000)
+            status = getattr(getattr(e, "response", None), "status_code", None)
+            text = getattr(getattr(e, "response", None), "text", "") or ""
+            snippet = (text[:200]).encode("ascii", "ignore").decode("ascii")
+            self.log.warning(
+                "marketwatch_fetch_blocked",
+                extra={"url": url, "status": status, "ms": elapsed_ms, "preview": snippet},
+            )
+            msg = f"blocked:{status}" if status in (401, 403) else f"http_error:{status}"
+            raise ScraperError(msg)
+        except Exception as e:
+            elapsed_ms = int((time.perf_counter() - start) * 1000)
+            self.log.warning(
+                "marketwatch_fetch_error",
+                extra={"url": url, "ms": elapsed_ms, "error": str(e)[:120]},
+            )
+            raise ScraperError(f"error:{str(e)[:80]}")
 
-    def _build_headers(self) -> Dict[str, str]:
+    def _build_headers(self, *, use_cookie: bool = True) -> Dict[str, str]:
         """
         Build headers including optional Cookie from env.
         """
-        cookie = self.cfg.get_str("MARKETWATCH_COOKIE", "")
+        cookie = self.cfg.get_str("MARKETWATCH_COOKIE", "") if use_cookie else ""
         ua = random.choice(self.USER_AGENTS)
         headers = {
             "User-Agent": ua,
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
-            "Accept-Language": "en-US,en;q=0.8",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.9",
             "Connection": "keep-alive",
             "Upgrade-Insecure-Requests": "1",
+            "Cache-Control": "no-cache",
         }
         if cookie:
             headers["Cookie"] = cookie
@@ -118,7 +151,7 @@ class MarketWatchService:
 
     def _extract_company_name(self, soup: BeautifulSoup) -> Optional[str]:
         """
-        Extract company name from header or quote module.
+        Extract company name from header or quote module. Fallback to <title> prefix.
         """
         candidates = [
             "[data-module='Quote'] h1",
@@ -132,6 +165,11 @@ class MarketWatchService:
                 name = el.get_text(strip=True)
                 if name:
                     return name
+        # Fallback: <title>
+        if soup.title and soup.title.string:
+            title = soup.title.string.strip()
+            # Remove sufixos comuns após " - "
+            return title.split(" - ")[0].strip() or None
         return None
 
     def _extract_performance_data(self, soup: BeautifulSoup) -> Dict[str, Optional[float]]:
@@ -183,7 +221,7 @@ class MarketWatchService:
 
     def _extract_competitors(self, soup: BeautifulSoup, base_url: str) -> List[Dict[str, Any]]:
         """
-        Extract up to five competitors with name and market_cap {currency, value}.
+        Extract up to five competitors with name, symbol, url and market_cap {currency, value}.
         """
         container = None
         for sel in self.COMPETITORS_CONTAINER_SELECTORS:
@@ -196,15 +234,17 @@ class MarketWatchService:
         items = self._find_competitor_items(container)
         out: List[Dict[str, Any]] = []
         for it in items:
-            name, url, mcap_text = self._extract_competitor_fields(it, base_url)
-            if not name:
+            name, symbol, url, mcap_text = self._extract_competitor_fields(it, base_url)
+            if not name and not symbol:
                 continue
             currency_value = parse_money(mcap_text) if mcap_text else None
             market_cap = None
             if currency_value:
                 market_cap = {"currency": currency_value[0], "value": float(currency_value[1])}
             out.append({
-                "name": name,
+                "name": name or symbol,
+                "symbol": symbol,
+                "url": url,
                 "market_cap": market_cap,
             })
             if len(out) >= 5:
@@ -227,16 +267,20 @@ class MarketWatchService:
                 return elems
         return container.find_all(True, recursive=False)
 
-    def _extract_competitor_fields(self, elem, base_url: str) -> (Optional[str], Optional[str], Optional[str]):
+    def _extract_competitor_fields(self, elem, base_url: str) -> Tuple[Optional[str], Optional[str], Optional[str], Optional[str]]:
         """
-        Extract competitor name, url, and market cap text from a row-like element.
+        Extract competitor name, symbol, url, and market cap text from a row-like element.
         """
-        link = elem.find("a", href=re.compile(r"/investing/stock/"))
+        link = elem.find("a", href=re.compile(r"/investing/stock/([A-Za-z0-9\.-]+)"))
         name = link.get_text(strip=True) if link else None
+        symbol = None
         url = None
         if link and link.get("href"):
             href = link.get("href")
             url = href if href.startswith("http") else f"{base_url}{href}"
+            m = re.search(r"/investing/stock/([A-Za-z0-9\.-]+)", href)
+            if m:
+                symbol = m.group(1).upper()
 
         mcap_text = None
         mcap_labels = ["Market Cap", "Mkt Cap", "Cap"]
@@ -251,7 +295,7 @@ class MarketWatchService:
             if spans:
                 mcap_text = spans[-1].get_text(strip=True)
 
-        return name, url, mcap_text
+        return name, symbol, url, mcap_text
 
 
 def scrape_marketwatch(symbol: str) -> Dict[str, Any]:

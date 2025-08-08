@@ -1,4 +1,3 @@
-# app/utils/http.py
 from dataclasses import dataclass
 from typing import Any, Dict, Optional, Protocol
 import requests
@@ -48,7 +47,14 @@ class RequestsHttpClient:
         """
         t = timeout or self.timeout
         resp = self.session.get(url, headers=headers, params=params, timeout=t)
-        resp.raise_for_status()
+        # Normaliza erros HTTP em mensagens explícitas (para o PolygonService mapear)
+        try:
+            resp.raise_for_status()
+        except requests.HTTPError as e:
+            # Re-levanta com código no texto, útil para heurística simples
+            code = getattr(e.response, "status_code", None)
+            msg = f"HTTPError {code}: {e}"
+            raise requests.HTTPError(msg, response=e.response) from None
         return resp.json() if resp.content else {}
 
 

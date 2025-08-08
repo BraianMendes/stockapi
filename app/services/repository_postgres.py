@@ -1,5 +1,4 @@
 from typing import Optional
-from sqlalchemy.orm import Session
 from datetime import datetime
 from .aggregator import StockRepository
 from ..db.models import StockPurchase
@@ -14,12 +13,12 @@ class PostgresStockRepository(StockRepository):
         self.session_factory = session_factory
 
     def get_purchased_amount(self, symbol: str) -> int:
-        with self.session_factory() as db:  # type: Session
+        with self.session_factory() as db:
             row: Optional[StockPurchase] = db.get(StockPurchase, symbol)
             return int(row.amount) if row else 0
 
     def set_purchased_amount(self, symbol: str, amount: int) -> None:
-        with self.session_factory() as db:  # type: Session
+        with self.session_factory() as db:
             row: Optional[StockPurchase] = db.get(StockPurchase, symbol)
             if row:
                 row.amount = int(amount)
