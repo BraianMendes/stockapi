@@ -1,5 +1,5 @@
 from typing import Optional
-from datetime import datetime
+from datetime import datetime, UTC
 from .aggregator import StockRepository
 from ..db.models import StockPurchase
 
@@ -20,10 +20,11 @@ class PostgresStockRepository(StockRepository):
     def set_purchased_amount(self, symbol: str, amount: int) -> None:
         with self.session_factory() as db:
             row: Optional[StockPurchase] = db.get(StockPurchase, symbol)
+            now = datetime.now(UTC)
             if row:
                 row.amount = int(amount)
-                row.updated_at = datetime.utcnow()
+                row.updated_at = now
             else:
-                row = StockPurchase(symbol=symbol, amount=int(amount), updated_at=datetime.utcnow())
+                row = StockPurchase(symbol=symbol, amount=int(amount), updated_at=now)
                 db.add(row)
             db.commit()

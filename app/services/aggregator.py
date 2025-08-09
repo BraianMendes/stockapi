@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any, Dict, Optional, Protocol, Union, List
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, UTC
 
 from ..models import Stock, StockValues, PerformanceData, Competitor, MarketCap
 from ..utils import EnvConfig, IsoDate, Symbol, RedisCache, ScraperError
@@ -27,7 +27,7 @@ class Clock(Protocol):
 
 class RealClock:
     def now(self) -> datetime:
-        return datetime.utcnow()
+        return datetime.now(UTC)
 
 
 @dataclass
@@ -118,7 +118,7 @@ class StockAggregator:
             status=ohlc.get("status", "ok"),
             purchased_amount=int(purchased_amount),
             purchased_status=purchased_status,
-            request_date=self._to_date(req_date_str),
+            request_data=self._to_date(req_date_str),
             company_code=sym,
             company_name=company_name,
             stock_values=StockValues(
@@ -128,32 +128,32 @@ class StockAggregator:
                 close=float(ohlc["close"]),
             ),
             performance_data=PerformanceData(
-                five_days=self._to_opt_float(performance_raw.get("five_days")),
-                one_month=self._to_opt_float(performance_raw.get("one_month")),
-                three_months=self._to_opt_float(performance_raw.get("three_months")),
-                year_to_date=self._to_opt_float(performance_raw.get("year_to_date")),
-                one_year=self._to_opt_float(performance_raw.get("one_year")),
+                five_days=self._to_float_zero(performance_raw.get("five_days")),
+                one_month=self._to_float_zero(performance_raw.get("one_month")),
+                three_months=self._to_float_zero(performance_raw.get("three_months")),
+                year_to_date=self._to_float_zero(performance_raw.get("year_to_date")),
+                one_year=self._to_float_zero(performance_raw.get("one_year")),
             ),
             competitors=self._map_competitors(competitors_raw),
         )
 
-        # Ensure JSON-friendly dict (dates -> strings) for Redis/json
-        self.cache.set(cache_key, stock.model_dump(mode="json"), self.cache_ttl)
+        # Ensure JSON-friendly dict (dates -> strings) and use aliases for consistency
+        self.cache.set(cache_key, stock.model_dump(mode="json", by_alias=True), self.cache_ttl)
         return stock
 
     def _map_competitors(self, items: List[Dict[str, Any]]) -> List[Competitor]:
         result: List[Competitor] = []
         for c in items:
-            name = c.get("name")
-            symbol = c.get("symbol")
-            url = c.get("url")
-            mc = c.get("market_cap")
-            market_cap = None
-            if isinstance(mc, dict) and mc.get("currency") and mc.get("value") is not None:
-                market_cap = MarketCap(currency=str(mc["currency"]), value=float(mc["value"]))
-            label = str(name or symbol or "").strip()
-            if label:
-                result.append(Competitor(name=label, symbol=(symbol or None), url=(url or None), market_cap=market_cap))
+            name = c.get("name") or c.get("symbol")
+            mc = c.get("market_cap") or {}
+            cur = mc.get("currency") or "USD"
+            val = mc.get("value")
+            try:
+                val_f = float(val) if val is not None else 0.0
+            except Exception:
+                val_f = 0.0
+            if name:
+                result.append(Competitor(name=str(name).strip(), market_cap=MarketCap(currency=str(cur), value=val_f)))
         return result
 
     def _resolve_request_date_str(self, d: Union[str, date, None]) -> str:
@@ -171,11 +171,11 @@ class StockAggregator:
     def _to_date(self, s: str) -> date:
         return date.fromisoformat(s)
 
-    def _to_opt_float(self, v: Any) -> Optional[float]:
+    def _to_float_zero(self, v: Any) -> float:
         try:
-            return float(v) if v is not None else None
+            return float(v) if v is not None else 0.0
         except Exception:
-            return None
+            return 0.0
 
     def _safe_get_amount(self, symbol: str) -> int:
         if self.repo is None:

@@ -1,21 +1,26 @@
 from datetime import date
-from typing import List, Optional
+from typing import List
 from pydantic import BaseModel, Field
+from pydantic.config import ConfigDict
 
 
 class MarketCap(BaseModel):
-    currency: str = Field(..., description="Currency code, e.g., USD")
-    value: float = Field(..., description="Market cap numeric value")
+    model_config = ConfigDict(populate_by_name=True)
+
+    currency: str = Field(..., alias="Currency", description="Currency code, e.g., USD")
+    value: float = Field(..., alias="Value", description="Market cap numeric value")
 
 
 class Competitor(BaseModel):
-    symbol: Optional[str] = Field(None, description="Competitor ticker symbol")
+    model_config = ConfigDict(populate_by_name=True)
+
     name: str = Field(..., description="Competitor company name")
-    url: Optional[str] = Field(None, description="Competitor MarketWatch URL")
-    market_cap: Optional[MarketCap] = Field(None, description="Competitor market cap")
+    market_cap: MarketCap = Field(..., description="Competitor market cap")
 
 
 class StockValues(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
     open: float = Field(..., description="Open price")
     high: float = Field(..., description="High price")
     low: float = Field(..., description="Low price")
@@ -23,20 +28,24 @@ class StockValues(BaseModel):
 
 
 class PerformanceData(BaseModel):
-    five_days: Optional[float] = Field(None, description="5D performance in percent")
-    one_month: Optional[float] = Field(None, description="1M performance in percent")
-    three_months: Optional[float] = Field(None, description="3M performance in percent")
-    year_to_date: Optional[float] = Field(None, description="YTD performance in percent")
-    one_year: Optional[float] = Field(None, description="1Y performance in percent")
+    model_config = ConfigDict(populate_by_name=True)
+
+    five_days: float = Field(0.0, description="5D performance in percent")
+    one_month: float = Field(0.0, description="1M performance in percent")
+    three_months: float = Field(0.0, description="3M performance in percent")
+    year_to_date: float = Field(0.0, description="YTD performance in percent")
+    one_year: float = Field(0.0, description="1Y performance in percent")
 
 
 class Stock(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
     status: str = Field(..., description="Overall status")
     purchased_amount: int = Field(..., description="Purchased amount")
     purchased_status: str = Field(..., description="Purchased or not_purchased")
-    request_date: date = Field(..., description="Request date (YYYY-MM-DD)")
+    request_data: date = Field(..., description="Request date (YYYY-MM-DD)")
     company_code: str = Field(..., description="Ticker symbol")
     company_name: str = Field(..., description="Company name")
-    stock_values: StockValues = Field(..., description="OHLC object")
+    stock_values: StockValues = Field(..., alias="Stock_values", description="OHLC object")
     performance_data: PerformanceData = Field(..., description="Performance object")
-    competitors: List[Competitor] = Field(..., description="List of competitors")
+    competitors: List[Competitor] = Field(..., alias="Competitors", description="List of competitors")

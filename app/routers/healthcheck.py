@@ -1,4 +1,4 @@
-from datetime import datetime, date, timedelta
+from datetime import datetime, date, timedelta, UTC
 from typing import Dict, Any
 from fastapi import APIRouter
 from ..services import PolygonService, MarketWatchService
@@ -82,7 +82,7 @@ def health() -> Dict[str, Any]:
     return {
         "status": "ok",
         "service": "stocks-api",
-        "time": datetime.utcnow().isoformat() + "Z",
+        "time": datetime.now(UTC).isoformat(),
     }
 
 
@@ -108,7 +108,7 @@ def readiness() -> Dict[str, Any]:
             "polygon": "healthy" if polygon_ok else "unhealthy",
             "marketwatch": "healthy" if marketwatch_ok else "unhealthy",
         },
-        "timestamp": datetime.utcnow().isoformat() + "Z",
+        "timestamp": datetime.now(UTC).isoformat(),
     }
 
 
