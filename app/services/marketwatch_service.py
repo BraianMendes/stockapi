@@ -25,12 +25,6 @@ class MarketWatchService:
     Scrapes MarketWatch for company name, performance data, and competitors.
     """
 
-    QUOTE_SELECTORS = [
-        "[data-module='Quote']",
-        ".intraday",
-        ".region--intraday",
-    ]
-
     PERFORMANCE_CONTAINER_SELECTORS = [
         "section[data-module='Performance']",
         "div[class*=performance]",
@@ -76,10 +70,8 @@ class MarketWatchService:
         self.base_url = base_url
         self.log = get_logger("app.services.marketwatch")
 
-        # Cache interno simples por símbolo
         self._cache: Dict[str, Dict[str, Any]] = {}
         self._cache_exp: Dict[str, datetime] = {}
-        # TTL padrão curto (ex.: 60s) para reduzir chamadas consecutivas
         self._cache_ttl = int(cache_ttl_seconds if cache_ttl_seconds is not None else self.cfg.get_int("MW_LOCAL_CACHE_TTL", 60))
 
     def get_overview(self, symbol: str, *, use_cookie: bool = True) -> Dict[str, Any]:
@@ -89,7 +81,6 @@ class MarketWatchService:
         """
         sym = Symbol.of(symbol).value
 
-        # Cache local por símbolo (independente de cookie), atende teste de hits consecutivos
         now = datetime.now(UTC)
         exp = self._cache_exp.get(sym)
         if exp and exp > now:
@@ -117,7 +108,6 @@ class MarketWatchService:
             "url": url,
         }
 
-        # Salva no cache local
         self._cache[sym] = data
         self._cache_exp[sym] = now + timedelta(seconds=self._cache_ttl)
 
@@ -203,11 +193,43 @@ class MarketWatchService:
                 name = el.get_text(strip=True)
                 if name:
                     return name
-        # Fallback: <title>
         if soup.title and soup.title.string:
             title = soup.title.string.strip()
-            # Remove sufixos comuns após " - "
             return title.split(" - ")[0].strip() or None
+        return None
+
+    def _normalize_perf_label(self, label: str) -> str:
+        """Normalize label text for performance mapping (e.g., '5 Day' -> '5 day')."""
+        s = label or ""
+        s = s.strip().lower()
+        s = re.sub(r"[\-_]+", " ", s)
+        s = re.sub(r"[^a-z0-9 %]+", " ", s)
+        s = re.sub(r"\s+", " ", s).strip()
+        return s
+
+    def _map_performance_label(self, label: str) -> Optional[str]:
+        """Map various MW labels to our keys."""
+        s = self._normalize_perf_label(label)
+        aliases = {
+            "five_days": {"5 d", "5 day", "5 days", "5d"},
+            "one_month": {"1 m", "1 mo", "1 month", "one month", "1m"},
+            "three_months": {"3 m", "3 mo", "3 month", "3 months", "three month", "three months", "3m"},
+            "year_to_date": {"ytd", "year to date", "year to date %", "year to date (%)", "year to date percent"},
+            "one_year": {"1 y", "1 yr", "1 year", "one year", "12 month", "12 months", "1y"},
+        }
+        for key, names in aliases.items():
+            if s in names:
+                return key
+        if s.startswith("5 ") and "day" in s:
+            return "five_days"
+        if s.startswith("1 ") and ("month" in s or s.endswith("m")):
+            return "one_month"
+        if s.startswith("3 ") and ("month" in s or s.endswith("m")):
+            return "three_months"
+        if s.startswith("1 ") and ("year" in s or s.endswith("y")):
+            return "one_year"
+        if "ytd" in s or "year to date" in s:
+            return "year_to_date"
         return None
 
     def _extract_performance_data(self, soup: BeautifulSoup) -> Dict[str, Optional[float]]:
@@ -221,16 +243,31 @@ class MarketWatchService:
                 break
 
         mapping = {
-            "five_days": ["5D"],
-            "one_month": ["1M"],
-            "three_months": ["3M"],
-            "year_to_date": ["YTD"],
-            "one_year": ["1Y"],
+            "five_days": ["5D", "5 Day", "5 Days"],
+            "one_month": ["1M", "1 Month"],
+            "three_months": ["3M", "3 Month", "3 Months"],
+            "year_to_date": ["YTD", "Year to Date"],
+            "one_year": ["1Y", "1 Year", "12 Month", "12 Months"],
         }
 
         out: Dict[str, Optional[float]] = {k: None for k in mapping.keys()}
         if not container:
             return out
+
+        table = container.select_one("table") or container.find_parent().select_one("table") if hasattr(container, "find_parent") else None
+        if table:
+            rows = table.select("tbody tr") or table.select("tr")
+            for tr in rows:
+                cells = tr.find_all(["td", "th"])
+                if len(cells) < 2:
+                    continue
+                label = cells[0].get_text(" ", strip=True)
+                value_text = cells[1].get_text(" ", strip=True)
+                key = self._map_performance_label(label)
+                if key:
+                    out[key] = parse_percent(value_text)
+            if any(v is not None for v in out.values()):
+                return out
 
         for key, labels in mapping.items():
             val = None
@@ -267,7 +304,7 @@ class MarketWatchService:
             try:
                 el = soup.select_one(sel)
             except Exception as e:
-                # Older SoupSieve versions may not support some pseudo-classes (e.g., :-soup-icontains)
+                # Older SoupSieve versões podem não suportar algumas pseudo-classes (ex.: :-soup-icontains)
                 self.log.debug("competitors_selector_error", extra={"selector": sel, "error": str(e)[:120]})
                 continue
             if el:
@@ -277,12 +314,10 @@ class MarketWatchService:
         if not container:
             container, used_selector = self._find_competitors_container_by_heading(soup)
         if not container:
-            # Log auxiliar quando não achar container
             title = (soup.title.string.strip() if soup.title and soup.title.string else None)
             self.log.info("competitors_container_not_found", extra={"title": title})
             return []
 
-        # Prefer table rows if a table exists inside container
         table = container.select_one("table")
         if table:
             items = table.select("tbody tr") or table.select("tr")
@@ -294,19 +329,16 @@ class MarketWatchService:
         for it in items:
             name, symbol, url, mcap_text = self._extract_competitor_fields(it, base_url)
 
-            # Filter obvious non-stock items by name
             name_lc = (name or "").strip().lower()
             if name_lc in blacklist_names:
                 continue
 
-            # Accept only when URL looks like a stock page or we have a plausible symbol
             is_stock_url = False
             if url:
                 u = url.lower()
                 is_stock_url = ("/investing/stock/" in u or "/quote/" in u) and not any(x in u for x in ["/index/", "/future/", "/futures/", "/crypto/", "/currency/", "/commodit", "/etf/"])
 
             if not (symbol or is_stock_url):
-                # Skip entries that don't look like stocks
                 continue
 
             currency_value = parse_money(mcap_text) if mcap_text else None
@@ -338,7 +370,6 @@ class MarketWatchService:
         for h in headings:
             txt = h.get_text(" ", strip=True)
             if re.search(r"\b(competitors?|peers?)\b", txt, flags=re.IGNORECASE):
-                # Prefer a nearby table/list after the heading
                 sib = h.find_next_sibling()
                 while sib and sib.name in {"script", "style"}:
                     sib = sib.find_next_sibling()
@@ -375,7 +406,6 @@ class MarketWatchService:
         """
         Extract competitor name, symbol, url, and market cap text from a row-like element.
         """
-        # Link and URL
         link = elem.find("a", href=True) or elem.select_one("a[data-symbol], a[aria-label]")
         name = link.get_text(strip=True) if link else None
         symbol = None
@@ -383,41 +413,34 @@ class MarketWatchService:
         if link and link.get("href"):
             href = link.get("href")
             url = href if href.startswith("http") else f"{base_url}{href}"
-            # Prefer explicit attributes
             data_sym = link.get("data-symbol") or link.get("data-ticker")
             if data_sym:
                 symbol = str(data_sym).strip().upper()
             if not symbol:
-                # Try aria-label patterns like "AAPL U.S.: Nasdaq Apple Inc."
                 aria = link.get("aria-label") or ""
                 m = re.search(r"\b([A-Z]{1,10}(?:\.[A-Z]{1,5})?)\b", aria)
                 if m:
                     symbol = m.group(1).upper()
             if not symbol:
-                # URL-based extraction
                 m = re.search(r"/investing/stock/([A-Za-z0-9\.-]+)", href) or re.search(r"/quote/([A-Za-z0-9\.-]+)", href)
                 if m:
                     symbol = m.group(1).upper()
 
-        # If still no symbol, look for a dedicated symbol element
         if not symbol:
             sym_el = elem.select_one(".symbol, [data-symbol], [data-ticker]")
             if sym_el:
                 symbol = (sym_el.get("data-symbol") or sym_el.get("data-ticker") or sym_el.get_text(strip=True) or "").upper()
 
-        # Try to parse pattern "Name (SYMB)"
         if not symbol and name:
             m = re.search(r"\(([A-Z]{1,10}(?:\.[A-Z]{1,5})?)\)", name)
             if m:
                 symbol = m.group(1).upper()
 
-        # Market Cap extraction
         mcap_text: Optional[str] = None
-        # Table cell based by header
         tr = elem if elem.name == "tr" else elem.find_parent("tr")
         if tr and tr.find_parent("table"):
-            # Build header map once per table (cache in attribute)
             table = tr.find_parent("table")
+            # Build header map once per table (cache in attribute)
             headers = getattr(table, "_mw_header_map", None)
             if headers is None:
                 headers = {}
@@ -426,7 +449,6 @@ class MarketWatchService:
                     key = th.get_text(" ", strip=True).lower()
                     headers[key] = idx
                 setattr(table, "_mw_header_map", headers)
-            # Find Market Cap column
             mcap_idx = None
             for k, idx in headers.items():
                 if "market cap" in k or k in {"mkt cap", "cap"}:
@@ -436,23 +458,14 @@ class MarketWatchService:
                 tds = tr.find_all(["td", "th"])
                 if 0 <= mcap_idx < len(tds):
                     mcap_text = tds[mcap_idx].get_text(" ", strip=True)
-        # Fallback scan within element text
         if not mcap_text:
             text = elem.get_text(" | ", strip=True)
             m = re.search(r"(Market\s*Cap|Mkt\s*Cap|Cap)\s*[:|\-]?\s*([$£€]?\s*[\d\.,]+\s*[KMBTkmbt]?)", text, flags=re.IGNORECASE)
             if m:
                 mcap_text = m.group(2)
-        # Fallback to last span/cell heuristics
         if not mcap_text:
             spans = elem.find_all("span")
             if spans:
                 mcap_text = spans[-1].get_text(strip=True)
 
         return name, symbol, url, mcap_text
-
-
-def scrape_marketwatch(symbol: str) -> Dict[str, Any]:
-    """
-    Convenience function using default MarketWatchService.
-    """
-    return MarketWatchService().get_overview(symbol)

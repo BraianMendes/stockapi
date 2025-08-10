@@ -44,6 +44,9 @@ docker run -d -p 8000:8000 \
 **Stock\_values:**
 
 * `open`, `high`, `low`, `close` *(float)*
+* `volume` *(float, optional)*
+* `afterHours` *(float, optional)*
+* `preMarket` *(float, optional)*
 
 **performance\_data:**
 
@@ -129,5 +132,5 @@ docker run -d -p 8000:8000 \
 * Middleware for correlation ID ensures consistent logs
 * Constructor-based dependency injection and small factories
 * Environment-based configuration, 12-factor friendly
-* Small, typed functions/methods with explicit names for easy testing
+
 

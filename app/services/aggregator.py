@@ -5,20 +5,20 @@ from typing import Any, Dict, Optional, Protocol, Union, List
 from datetime import date, datetime, timedelta, UTC
 
 from ..models import Stock, StockValues, PerformanceData, Competitor, MarketCap
-from ..utils import EnvConfig, IsoDate, Symbol, RedisCache, ScraperError
+from ..utils import EnvConfig, IsoDate, Symbol, RedisCache
+from ..utils.dates import last_business_day
 from .polygon_service import PolygonService
 from .marketwatch_service import MarketWatchService
 
 
 class StockRepository(Protocol):
-    def get_purchased_amount(self, symbol: str) -> int: ...
-    def set_purchased_amount(self, symbol: str, amount: int) -> None: ...
+    def get_purchased_amount(self, symbol: str) -> float: ...
+    def set_purchased_amount(self, symbol: str, amount: float) -> None: ...
 
 
 class Cache(Protocol):
     def get(self, key: str) -> Optional[Any]: ...
     def set(self, key: str, value: Any, ttl_seconds: int) -> None: ...
-    def clear(self) -> None: ...
 
 
 class Clock(Protocol):
@@ -54,10 +54,6 @@ class InMemoryCache:
     def set(self, key: str, value: Any, ttl_seconds: int) -> None:
         self._store[key] = value
         self._expires[key] = self._clock.now() + timedelta(seconds=ttl_seconds)
-
-    def clear(self) -> None:
-        self._store.clear()
-        self._expires.clear()
 
     def delete_by_symbol(self, symbol: str) -> int:
         prefix = f"stock:{symbol.upper()}:"
@@ -143,7 +139,7 @@ class StockAggregator:
 
         stock = Stock(
             status=ohlc.get("status", "ok"),
-            purchased_amount=int(purchased_amount),
+            purchased_amount=float(purchased_amount),
             purchased_status=purchased_status,
             request_data=self._to_date(req_date_str),
             company_code=sym,
@@ -194,14 +190,8 @@ class StockAggregator:
 
     def _resolve_request_date_str(self, d: Union[str, date, None]) -> str:
         if d is None:
-            return IsoDate.from_any(self._last_business_day()).value
+            return IsoDate.from_any(last_business_day()).value
         return IsoDate.from_any(d).value
-
-    def _last_business_day(self, start: Optional[date] = None) -> date:
-        d = (start or date.today()) - timedelta(days=1)
-        while d.weekday() >= 5:
-            d -= timedelta(days=1)
-        return d
 
     def _to_date(self, s: str) -> date:
         return date.fromisoformat(s)
@@ -212,10 +202,10 @@ class StockAggregator:
         except Exception:
             return 0.0
 
-    def _safe_get_amount(self, symbol: str) -> int:
+    def _safe_get_amount(self, symbol: str) -> float:
         if self.repo is None:
-            return 0
+            return 0.0
         try:
-            return int(self.repo.get_purchased_amount(symbol))
+            return float(self.repo.get_purchased_amount(symbol))
         except Exception:
-            return 0
+            return 0.0

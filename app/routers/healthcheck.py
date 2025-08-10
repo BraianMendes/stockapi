@@ -3,6 +3,7 @@ from typing import Dict, Any
 from fastapi import APIRouter
 from ..services import PolygonService, MarketWatchService
 from ..utils import EnvConfig, PolygonError, ScraperError
+from ..utils.dates import last_business_day
 
 router = APIRouter(tags=["Health"])
 
@@ -11,32 +12,35 @@ polygon_svc = PolygonService()
 mw_svc = MarketWatchService()
 
 
-def last_trading_date(start: date | None = None) -> date:
-    """
-    Return the last business day before `start` (or today).
-    """
-    d = (start or date.today()) - timedelta(days=1)
-    while d.weekday() >= 5:
-        d -= timedelta(days=1)
-    return d
-
-
 def check_polygon() -> str:
     """
     Verify Polygon Daily Open/Close by fetching OHLC for AAPL.
+    - Try last business day; if data not found, try up to 5 previous business days.
+    - Treat 'no data' (404) as ok_no_data for readiness purposes if API is reachable.
     """
-    try:
-        _ = polygon_svc.get_ohlc("AAPL", last_trading_date())
-        return "ok"
-    except PolygonError as e:
-        msg = str(e).lower()
-        if "missing" in msg and "key" in msg:
-            return "missing_api_key"
-        if "rate" in msg and "limit" in msg:
-            return "rate_limited"
-        return f"error:{msg}"
-    except Exception as e:
-        return f"error:{str(e)[:60]}"
+    start_d = last_business_day()
+    tried = []
+    for i in range(0, 5):
+        d = start_d if i == 0 else last_business_day(start_d)
+        start_d = d
+        tried.append(d.isoformat())
+        try:
+            _ = polygon_svc.get_ohlc("AAPL", d)
+            return "ok"
+        except PolygonError as e:
+            msg = str(e).lower()
+            if "missing" in msg and "key" in msg:
+                return "missing_api_key"
+            if "unauthorized" in msg:
+                return "unauthorized"
+            if "rate_limited" in msg or "rate" in msg:
+                return "rate_limited"
+            if "not_found" in msg or "missing_ohlc_fields" in msg or "no data" in msg:
+                continue
+            return f"error:{msg}"
+        except Exception as e:
+            return f"error:{str(e)[:60]}"
+    return "ok_no_data"
 
 
 def check_marketwatch() -> str:
@@ -93,7 +97,7 @@ def readiness() -> Dict[str, Any]:
         "marketwatch_api": check_marketwatch(),
     }
 
-    polygon_ok = checks["polygon_api"] == "ok"
+    polygon_ok = checks["polygon_api"] in {"ok", "ok_no_data"}
     marketwatch_ok = checks["marketwatch_api"] in {"ok", "ok_basic"}
 
     all_ok = polygon_ok and marketwatch_ok

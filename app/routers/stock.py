@@ -10,6 +10,7 @@ from ..services.repository_postgres import PostgresStockRepository
 from ..db.database import SessionLocal
 from ..utils import EnvConfig, RedisCache
 from ..utils.errors import PolygonError
+from ..utils.error_codes import ErrorCode
 
 router = APIRouter(prefix="/stock", tags=["Stock"])
 
@@ -23,15 +24,26 @@ class PurchaseBody(BaseModel):
 
 _SYMBOL_RE = re.compile(r"^[A-Z][A-Z0-9\.-]{0,15}$")
 
+TODAY_STR = date.today().isoformat()
+
+
 def _symbol_or_400(symbol: str) -> str:
     sym = str(symbol or "").strip().upper()
     if not _SYMBOL_RE.match(sym):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail={"code": "invalid_symbol", "message": "Invalid stock symbol"})
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail={"code": ErrorCode.INVALID_SYMBOL, "message": "Invalid stock symbol"})
     return sym
 
 
-def _http_error(detail_code: str, message: str, *, http_status: int = status.HTTP_502_BAD_GATEWAY):
-    raise HTTPException(status_code=http_status, detail={"code": detail_code, "message": message})
+def _http_error(detail_code: ErrorCode | str, message: str, *, http_status: int = status.HTTP_502_BAD_GATEWAY):
+    code = str(detail_code)
+    raise HTTPException(status_code=http_status, detail={"code": code, "message": message})
+
+
+def _set_meta_headers(response: Response) -> None:
+    meta = getattr(_aggregator, "last_meta", {}) or {}
+    response.headers["X-Cache"] = str(meta.get("cache") or "")
+    response.headers["X-MarketWatch-Status"] = str(meta.get("marketwatch_status") or "")
+    response.headers["X-MarketWatch-Used-Cookie"] = "true" if meta.get("mw_used_cookie") else "false"
 
 
 @router.get("/{symbol}", response_model=Stock, summary="Get stock payload")
@@ -40,29 +52,18 @@ def get_stock(
     symbol: str = Path(
         ...,
         description="Ticker symbol (path)",
-        examples={
-            "AAPL": {"summary": "Apple", "value": "AAPL"},
-            "DELL": {"summary": "Dell Technologies", "value": "DELL"},
-            "HPQ": {"summary": "HP Inc.", "value": "HPQ"},
-        },
+        example="AAPL",
     ),
     request_date: Optional[date] = Query(
         None,
         description="YYYY-MM-DD",
-        examples={"default": {"summary": "Request date", "value": "2025-05-05"}},
-    ),
-    refresh: bool = Query(
-        False,
-        description="When true, bypass cache and re-fetch upstream data (useful after setting cookie)",
+        example=TODAY_STR,
     ),
 ) -> Stock:
     sym = _symbol_or_400(symbol)
     try:
-        stock = _aggregator.get_stock(sym, request_date, bypass_cache=bool(refresh))
-        meta = getattr(_aggregator, "last_meta", {}) or {}
-        response.headers["X-Cache"] = str(meta.get("cache") or "")
-        response.headers["X-MarketWatch-Status"] = str(meta.get("marketwatch_status") or "")
-        response.headers["X-MarketWatch-Used-Cookie"] = "true" if meta.get("mw_used_cookie") else "false"
+        stock = _aggregator.get_stock(sym, request_date)
+        _set_meta_headers(response)
         try:
             _repo.save_snapshot(stock)
         except Exception:
@@ -71,15 +72,15 @@ def get_stock(
     except PolygonError as e:
         msg = str(e).lower()
         if "unauthorized" in msg:
-            _http_error("polygon_unauthorized", "Polygon API unauthorized")
+            _http_error(ErrorCode.POLYGON_UNAUTHORIZED, "Polygon API unauthorized")
         elif "rate_limited" in msg or "rate" in msg:
-            _http_error("polygon_rate_limited", "Polygon API rate limited")
+            _http_error(ErrorCode.POLYGON_RATE_LIMITED, "Polygon API rate limited")
         else:
-            _http_error("polygon_http_error", "Polygon API error")
+            _http_error(ErrorCode.POLYGON_HTTP_ERROR, "Polygon API error")
     except HTTPException:
         raise
     except Exception:
-        _http_error("upstream_error", "Failed to retrieve stock data")
+        _http_error(ErrorCode.UPSTREAM_ERROR, "Failed to retrieve stock data")
 
 
 @router.post("/{symbol}", status_code=status.HTTP_201_CREATED, summary="Add purchased amount")
@@ -88,11 +89,7 @@ def add_purchase(
     symbol: str = Path(
         ...,
         description="Ticker symbol (path)",
-        examples={
-            "AAPL": {"summary": "Apple", "value": "AAPL"},
-            "DELL": {"summary": "Dell Technologies", "value": "DELL"},
-            "HPQ": {"summary": "HP Inc.", "value": "HPQ"},
-        },
+        example="AAPL",
     ),
     body: PurchaseBody = Body(
         ...,
@@ -105,20 +102,13 @@ def add_purchase(
     request_date: Optional[date] = Query(
         None,
         description="YYYY-MM-DD",
-        examples={"default": {"summary": "Request date", "value": "2025-05-05"}},
-    ),
-    refresh: bool = Query(
-        False,
-        description="When true, bypass cache and re-fetch upstream data before saving",
+        example=TODAY_STR,
     ),
 ):
     sym = _symbol_or_400(symbol)
     try:
-        stock = _aggregator.get_stock(sym, request_date, bypass_cache=bool(refresh))
-        meta = getattr(_aggregator, "last_meta", {}) or {}
-        response.headers["X-Cache"] = str(meta.get("cache") or "")
-        response.headers["X-MarketWatch-Status"] = str(meta.get("marketwatch_status") or "")
-        response.headers["X-MarketWatch-Used-Cookie"] = "true" if meta.get("mw_used_cookie") else "false"
+        stock = _aggregator.get_stock(sym, request_date)
+        _set_meta_headers(response)
 
         _repo.set_purchased_amount(sym, body.amount)
         stock.purchased_amount = float(body.amount)
@@ -132,26 +122,30 @@ def add_purchase(
     except PolygonError as e:
         msg = str(e).lower()
         if "unauthorized" in msg:
-            _http_error("polygon_unauthorized", "Polygon API unauthorized")
+            _http_error(ErrorCode.POLYGON_UNAUTHORIZED, "Polygon API unauthorized")
         elif "rate_limited" in msg or "rate" in msg:
-            _http_error("polygon_rate_limited", "Polygon API rate limited")
+            _http_error(ErrorCode.POLYGON_RATE_LIMITED, "Polygon API rate limited")
         else:
-            _http_error("polygon_http_error", "Polygon API error")
+            _http_error(ErrorCode.POLYGON_HTTP_ERROR, "Polygon API error")
     except HTTPException:
         raise
     except Exception:
-        _http_error("purchase_error", "Failed to add purchased amount", http_status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        _http_error(ErrorCode.PURCHASE_ERROR, "Failed to add purchased amount", http_status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 def _invalidate_symbol_cache(symbol: str) -> None:
     cfg = EnvConfig()
     redis_url = cfg.get_str("REDIS_URL")
     if redis_url and RedisCache is not None:
-        from ..utils.redis_cache import RedisCache as _RC
-        rc = _RC(url=redis_url, prefix="stocks")
-        for k in rc.client.scan_iter(f"{rc.prefix}:stock:{symbol}:*"):
-            rc.client.delete(k)
+        try:
+            rc = RedisCache(url=redis_url, prefix="stocks")
+            rc.delete_by_symbol(symbol)
+        except Exception:
+            pass
     else:
         cache = getattr(_aggregator, "cache", None)
-        if isinstance(cache, InMemoryCache):
-            cache.delete_by_symbol(symbol)
+        if cache is not None and hasattr(cache, "delete_by_symbol"):
+            try:
+                cache.delete_by_symbol(symbol)
+            except Exception:
+                pass

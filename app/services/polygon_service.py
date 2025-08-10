@@ -24,28 +24,35 @@ class PolygonService:
     ) -> None:
         self.http = http or HttpClientFactory.default()
         self.cfg = config or EnvConfig()
-        self.base_url = base_url
+        self.base_url = self.cfg.get_str("POLYGON_BASE_URL", base_url)
 
     def get_ohlc(self, symbol: str, data_date: Union[str, date]) -> Dict[str, Any]:
         """
         Return normalized OHLC for the symbol on the given date.
         """
-        api_key = self.cfg.get_str_required("POLYGON_API_KEY")
+        try:
+            api_key = self.cfg.get_str_required("POLYGON_API_KEY")
+        except Exception:
+            raise PolygonError("missing_api_key")
+
         adjusted = "true" if self.cfg.get_bool("POLYGON_ADJUSTED", True) else "false"
         timeout = self.cfg.get_float("HTTP_TIMEOUT", 15.0)
 
         sym = Symbol.of(symbol).value
         ds = IsoDate.from_any(data_date).value
         url = f"{self.base_url}/{sym}/{ds}"
-        headers = {"Authorization": f"Bearer {api_key}"}
-        params = {"adjusted": adjusted}
+        params = {"adjusted": adjusted, "apiKey": api_key}
 
         try:
-            payload = self.http.get_json(url, headers=headers, params=params, timeout=timeout)
+            payload = self.http.get_json(url, headers=None, params=params, timeout=timeout)
         except Exception as e:
             msg = str(e).lower()
-            if "401" in msg or "403" in msg:
+            if "missing" in msg and "key" in msg:
+                raise PolygonError("missing_api_key")
+            if "401" in msg or "403" in msg or "unauthorized" in msg:
                 raise PolygonError("unauthorized")
+            if "404" in msg or "not found" in msg:
+                raise PolygonError("not_found")
             if "429" in msg or "too many" in msg:
                 raise PolygonError("rate_limited")
             if any(code in msg for code in ("500", "502", "503", "504")):

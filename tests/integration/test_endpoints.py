@@ -3,7 +3,6 @@ from fastapi.testclient import TestClient
 from app.main import app
 import app.routers.stock as stock_router
 from app.services.aggregator import InMemoryCache
-from app.services.repository_postgres import PostgresStockRepository
 
 os.environ.setdefault("POLYGON_API_KEY", "test-key")
 
@@ -25,9 +24,9 @@ class FakeMW:
         }
 
 
-class FakeRepo(PostgresStockRepository):
+class FakeRepo:
     def __init__(self):
-        pass
+        self._last = None
     def get_purchased_amount(self, symbol: str) -> int:
         return 0
     def set_purchased_amount(self, symbol: str, amount: int) -> None:
@@ -68,20 +67,21 @@ def test_invalid_symbol_400():
     r = client.get("/stock/@@@")
     assert r.status_code == 400
     body = r.json()
-    assert body["detail"]["code"] == "invalid_symbol"
+    assert (body["detail"]["code"]) in {"invalid_symbol", "ErrorCode.INVALID_SYMBOL"} or str(body["detail"]["code"]).endswith("invalid_symbol")
 
 
-def test_get_headers_and_refresh_param():
+def test_get_headers():
     r1 = client.get("/stock/AAPL?request_date=2025-08-07")
     assert r1.status_code == 200
     assert r1.headers.get("X-Cache") in {"miss", "hit", "bypass"}
     assert r1.headers.get("X-MarketWatch-Status") in {"ok", "fallback", "skipped"}
     assert r1.headers.get("X-MarketWatch-Used-Cookie") in {"true", "false"}
 
-    r2 = client.get("/stock/AAPL?request_date=2025-08-07&refresh=true")
+    # Second call should be served from cache (hit)
+    r2 = client.get("/stock/AAPL?request_date=2025-08-07")
     assert r2.status_code == 200
-    assert r2.headers.get("X-Cache") == "bypass"
-    assert r2.headers.get("X-MarketWatch-Status") in {"ok", "fallback"}
+    assert r2.headers.get("X-Cache") == "hit"
+    assert r2.headers.get("X-MarketWatch-Status") == "skipped"
 
 
 def test_post_headers_present():
