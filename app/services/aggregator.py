@@ -59,6 +59,14 @@ class InMemoryCache:
         self._store.clear()
         self._expires.clear()
 
+    def delete_by_symbol(self, symbol: str) -> int:
+        prefix = f"stock:{symbol.upper()}:"
+        to_del = [k for k in list(self._store.keys()) if k.startswith(prefix)]
+        for k in to_del:
+            self._store.pop(k, None)
+            self._expires.pop(k, None)
+        return len(to_del)
+
 
 class StockAggregator:
     """
@@ -91,21 +99,40 @@ class StockAggregator:
             else:
                 self.cache = InMemoryCache()
 
-    def get_stock(self, symbol: str, request_date: Union[str, date, None]) -> Stock:
+        self.last_meta: Dict[str, Any] = {}
+
+    def get_stock(self, symbol: str, request_date: Union[str, date, None], *, bypass_cache: bool = False) -> Stock:
+        self.last_meta = {}
+
         sym = Symbol.of(symbol).value
         req_date_str = self._resolve_request_date_str(request_date)
         cache_key = f"stock:{sym}:{req_date_str}"
 
-        cached = self.cache.get(cache_key)
-        if cached is not None:
-            return Stock.model_validate(cached)
+        if not bypass_cache:
+            cached = self.cache.get(cache_key)
+            if cached is not None:
+                self.last_meta = {
+                    "cache": "hit",
+                    "marketwatch_status": "skipped",
+                    "mw_used_cookie": False,
+                }
+                return Stock.model_validate(cached)
 
         ohlc = self.polygon.get_ohlc(sym, req_date_str)
 
+        mw_status = "ok"
+        mw_used_cookie = True
         try:
-            mw = self.marketwatch.get_overview(sym)
-        except ScraperError:
-            mw = {"company_name": sym, "performance": {}, "competitors": []}
+            mw = self.marketwatch.get_overview(sym, use_cookie=True)
+        except Exception:
+            try:
+                mw = self.marketwatch.get_overview(sym, use_cookie=False)
+                mw_status = "ok"
+                mw_used_cookie = False
+            except Exception:
+                mw = {"company_name": sym, "performance": {}, "competitors": []}
+                mw_status = "fallback"
+                mw_used_cookie = False
 
         purchased_amount = self._safe_get_amount(sym)
         purchased_status = "purchased" if purchased_amount > 0 else "not_purchased"
@@ -126,6 +153,9 @@ class StockAggregator:
                 high=float(ohlc["high"]),
                 low=float(ohlc["low"]),
                 close=float(ohlc["close"]),
+                volume=(float(ohlc.get("volume")) if ohlc.get("volume") is not None else None),
+                after_hours=(float(ohlc.get("afterHours")) if ohlc.get("afterHours") is not None else None),
+                pre_market=(float(ohlc.get("preMarket")) if ohlc.get("preMarket") is not None else None),
             ),
             performance_data=PerformanceData(
                 five_days=self._to_float_zero(performance_raw.get("five_days")),
@@ -137,8 +167,14 @@ class StockAggregator:
             competitors=self._map_competitors(competitors_raw),
         )
 
-        # Ensure JSON-friendly dict (dates -> strings) and use aliases for consistency
-        self.cache.set(cache_key, stock.model_dump(mode="json", by_alias=True), self.cache_ttl)
+        self.last_meta = {
+            "cache": "bypass" if bypass_cache else "miss",
+            "marketwatch_status": mw_status,
+            "mw_used_cookie": bool(mw_used_cookie),
+        }
+
+        if not bypass_cache:
+            self.cache.set(cache_key, stock.model_dump(mode="json", by_alias=True), self.cache_ttl)
         return stock
 
     def _map_competitors(self, items: List[Dict[str, Any]]) -> List[Competitor]:
@@ -157,7 +193,6 @@ class StockAggregator:
         return result
 
     def _resolve_request_date_str(self, d: Union[str, date, None]) -> str:
-        # Se não for informado, usar o último dia útil (evita fins de semana/feriados em dev)
         if d is None:
             return IsoDate.from_any(self._last_business_day()).value
         return IsoDate.from_any(d).value

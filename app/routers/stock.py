@@ -45,23 +45,20 @@ def get_stock(
             "DELL": {"summary": "Dell Technologies", "value": "DELL"},
             "HPQ": {"summary": "HP Inc.", "value": "HPQ"},
         },
-        example="DELL",
     ),
     request_date: Optional[date] = Query(
         None,
         description="YYYY-MM-DD",
         examples={"default": {"summary": "Request date", "value": "2025-05-05"}},
-        example="2025-05-15",
     ),
     refresh: bool = Query(
         False,
         description="When true, bypass cache and re-fetch upstream data (useful after setting cookie)",
-        example=False,
     ),
 ) -> Stock:
     sym = _symbol_or_400(symbol)
     try:
-        stock = _aggregator.get_stock(sym, request_date)
+        stock = _aggregator.get_stock(sym, request_date, bypass_cache=bool(refresh))
         meta = getattr(_aggregator, "last_meta", {}) or {}
         response.headers["X-Cache"] = str(meta.get("cache") or "")
         response.headers["X-MarketWatch-Status"] = str(meta.get("marketwatch_status") or "")
@@ -96,7 +93,6 @@ def add_purchase(
             "DELL": {"summary": "Dell Technologies", "value": "DELL"},
             "HPQ": {"summary": "HP Inc.", "value": "HPQ"},
         },
-        example="DELL",
     ),
     body: PurchaseBody = Body(
         ...,
@@ -110,17 +106,15 @@ def add_purchase(
         None,
         description="YYYY-MM-DD",
         examples={"default": {"summary": "Request date", "value": "2025-05-05"}},
-        example="2025-05-15",
     ),
     refresh: bool = Query(
         False,
         description="When true, bypass cache and re-fetch upstream data before saving",
-        example=False,
     ),
 ):
     sym = _symbol_or_400(symbol)
     try:
-        stock = _aggregator.get_stock(sym, request_date)
+        stock = _aggregator.get_stock(sym, request_date, bypass_cache=bool(refresh))
         meta = getattr(_aggregator, "last_meta", {}) or {}
         response.headers["X-Cache"] = str(meta.get("cache") or "")
         response.headers["X-MarketWatch-Status"] = str(meta.get("marketwatch_status") or "")
