@@ -3,8 +3,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from dotenv import load_dotenv
 
-from app.routers.stock import router as stock_router
-from app.routers.healthcheck import router as health_router
+from app.routers import routers as api_routers
 from app.db.database import init_db
 
 from app.utils import configure_logging, get_logger
@@ -56,8 +55,9 @@ app.add_middleware(
     skip_paths={"/health", "/ready", "/docs", "/redoc", "/openapi.json"},
 )
 
-app.include_router(health_router)
-app.include_router(stock_router)
+# Include routers exposed by app.routers package
+for r in api_routers:
+    app.include_router(r)
 
 @app.get("/", tags=["Health"], summary="API index")
 def index():

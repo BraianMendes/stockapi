@@ -1,6 +1,5 @@
-from typing import Iterator
 from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker, Session
+from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 from ..utils import EnvConfig
 from .models import Base
@@ -28,14 +27,3 @@ def init_db() -> None:
     Create tables if not exist (dev-friendly). For prod, prefer Alembic migrations.
     """
     Base.metadata.create_all(bind=engine)
-
-
-def get_session() -> Iterator[Session]:
-    """
-    FastAPI dependency to yield a session.
-    """
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()

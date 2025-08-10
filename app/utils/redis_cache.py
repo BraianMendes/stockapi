@@ -30,7 +30,3 @@ class RedisCache:
     def set(self, key: str, value: Any, ttl_seconds: int) -> None:
         raw = json.dumps(value)
         self.client.set(self._k(key), raw, ex=ttl_seconds)
-
-    def clear(self) -> None:
-        for k in self.client.scan_iter(f"{self.prefix}:*"):
-            self.client.delete(k)

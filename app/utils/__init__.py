@@ -8,9 +8,6 @@ from .http import (
 from .errors import ExternalServiceError, PolygonError, ScraperError
 from .value_objects import IsoDate, Symbol, Percentage, Money
 from .parsing import (
-    to_iso_date,
-    normalize_symbol,
-    parse_float,
     parse_percent,
     parse_money,
 )
@@ -39,9 +36,6 @@ __all__ = [
     "Symbol",
     "Percentage",
     "Money",
-    "to_iso_date",
-    "normalize_symbol",
-    "parse_float",
     "parse_percent",
     "parse_money",
     "configure_logging",

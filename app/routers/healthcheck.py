@@ -8,7 +8,6 @@ router = APIRouter(tags=["Health"])
 
 cfg = EnvConfig()
 polygon_svc = PolygonService()
-# Reutiliza uma instância, mas permite togglar cookie por chamada
 mw_svc = MarketWatchService()
 
 
@@ -44,9 +43,8 @@ def check_marketwatch() -> str:
     """
     Verify MarketWatch scraping by fetching overview for AAPL.
     Accept partial responses as healthy enough for readiness.
-    Estratégia de cookie: tenta sem cookie primeiro; se bloqueado (401/403), tenta com cookie do env.
+    Cookie strategy: try without cookie first; if blocked (401/403), try again with env cookie.
     """
-    # 1) Tenta sem cookie (para detectar bloqueios rapidamente)
     try:
         data = mw_svc.get_overview("AAPL", use_cookie=False)
         perf = data.get("performance") or {}
@@ -57,7 +55,6 @@ def check_marketwatch() -> str:
         return "ok_basic"
     except ScraperError as e:
         msg = str(e)
-        # 2) Se bloqueado, tenta novamente com cookie
         if msg.startswith("blocked:"):
             try:
                 data = mw_svc.get_overview("AAPL", use_cookie=True)

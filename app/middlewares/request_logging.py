@@ -55,7 +55,6 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
                     "client": request.client.host if request.client else None,
                 },
             )
-            # Garante X-Trace-Id mesmo em erros
             response = Response(status_code=status_code)
         finally:
             try:

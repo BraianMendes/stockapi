@@ -19,30 +19,53 @@ if [ "${EMBEDDED_SERVICES}" = "true" ]; then
   [ -z "${REDIS_URL:-}" ] && export REDIS_URL="redis://127.0.0.1:6379/0"
 fi
 
+find_pg_bin() {
+  if command -v initdb >/dev/null 2>&1; then
+    PGBIN="$(dirname "$(command -v initdb)")"
+  elif command -v pg_config >/dev/null 2>&1; then
+    PGBIN="$(pg_config --bindir)"
+  else
+    PGBIN="$(ls -d /usr/lib/postgresql/*/bin 2>/dev/null | sort -V | tail -n1 || true)"
+  fi
+  if [ -z "${PGBIN:-}" ] || [ ! -x "$PGBIN/initdb" ]; then
+    echo "[entrypoint] ERROR: PostgreSQL binaries not found (initdb missing)."
+    echo "[entrypoint] Ensure 'postgresql' is installed in the image or adjust PATH."
+    exit 1
+  fi
+  export PATH="$PGBIN:$PATH"
+  PG_INITDB="$PGBIN/initdb"
+  PG_CTL="$PGBIN/pg_ctl"
+  PSQL="$PGBIN/psql"
+  PG_ISREADY="$PGBIN/pg_isready"
+  echo "[entrypoint] Using PostgreSQL bin at $PGBIN"
+}
+
 start_postgres() {
   echo "[entrypoint] Starting PostgreSQL"
   mkdir -p "$PGDATA"
   chown -R postgres:postgres "$PGDATA"
 
+  find_pg_bin
+
   if [ ! -s "$PGDATA/PG_VERSION" ]; then
     echo "[entrypoint] Initializing data dir at $PGDATA"
-    runuser -u postgres -- initdb -D "$PGDATA" -E UTF8 -U postgres
+    runuser -u postgres -- sh -c "\"$PG_INITDB\" -D '$PGDATA' -E UTF8 -U postgres"
     echo "listen_addresses = 'localhost'" >> "$PGDATA/postgresql.conf"
     echo "host all all 127.0.0.1/32 md5" >> "$PGDATA/pg_hba.conf"
   fi
 
-  runuser -u postgres -- pg_ctl -D "$PGDATA" -o "-p 5432 -c listen_addresses=localhost" -w start
+  runuser -u postgres -- sh -c "\"$PG_CTL\" -D '$PGDATA' -o '-p 5432 -c listen_addresses=localhost' -w start"
 
-  if ! runuser -u postgres -- psql -U postgres -tAc "SELECT 1 FROM pg_roles WHERE rolname='${POSTGRES_USER}'" | grep -q 1; then
-    runuser -u postgres -- psql -U postgres -c "CREATE ROLE ${POSTGRES_USER} LOGIN PASSWORD '${POSTGRES_PASSWORD}'"
+  if ! runuser -u postgres -- sh -c "\"$PSQL\" -U postgres -tAc 'SELECT 1 FROM pg_roles WHERE rolname='\''${POSTGRES_USER}'\'''" | grep -q 1; then
+    runuser -u postgres -- sh -c "\"$PSQL\" -U postgres -c 'CREATE ROLE ${POSTGRES_USER} LOGIN PASSWORD '\''${POSTGRES_PASSWORD}'\'''"
   fi
 
-  if ! runuser -u postgres -- psql -U postgres -tAc "SELECT 1 FROM pg_database WHERE datname='${POSTGRES_DB}'" | grep -q 1; then
-    runuser -u postgres -- psql -U postgres -c "CREATE DATABASE ${POSTGRES_DB} OWNER ${POSTGRES_USER}"
+  if ! runuser -u postgres -- sh -c "\"$PSQL\" -U postgres -tAc 'SELECT 1 FROM pg_database WHERE datname='\''${POSTGRES_DB}'\'''" | grep -q 1; then
+    runuser -u postgres -- sh -c "\"$PSQL\" -U postgres -c 'CREATE DATABASE ${POSTGRES_DB} OWNER ${POSTGRES_USER}'"
   fi
 
   for i in 1 2 3 4 5 6 7 8 9 10; do
-    if pg_isready -h 127.0.0.1 -p 5432 -U "${POSTGRES_USER}" >/dev/null 2>&1; then
+    if runuser -u postgres -- sh -c "\"$PG_ISREADY\" -q"; then
       break
     fi
     sleep 1
@@ -66,7 +89,8 @@ stop_services() {
     redis-cli shutdown || true
   fi
   if [ -s "$PGDATA/PG_VERSION" ]; then
-    runuser -u postgres -- pg_ctl -D "$PGDATA" -m fast stop || true
+    find_pg_bin || true
+    runuser -u postgres -- sh -c "\"$PG_CTL\" -D '$PGDATA' -m fast stop" || true
   fi
 }
 

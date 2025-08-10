@@ -40,12 +40,10 @@ class PolygonService:
         headers = {"Authorization": f"Bearer {api_key}"}
         params = {"adjusted": adjusted}
 
-        # Mapeia erros HTTP para PolygonError coerentes com o whiteboard
         try:
             payload = self.http.get_json(url, headers=headers, params=params, timeout=timeout)
         except Exception as e:
             msg = str(e).lower()
-            # Heurística simples baseada na mensagem de requests
             if "401" in msg or "403" in msg:
                 raise PolygonError("unauthorized")
             if "429" in msg or "too many" in msg:
@@ -62,7 +60,11 @@ class PolygonService:
         if open_v is None or high_v is None or low_v is None or close_v is None:
             raise PolygonError("missing_ohlc_fields")
 
-        return {
+        volume_v = payload.get("volume")
+        after_hours_v = payload.get("afterHours")
+        pre_market_v = payload.get("preMarket")
+
+        result: Dict[str, Any] = {
             "status": payload.get("status") or "ok",
             "symbol": payload.get("symbol") or payload.get("ticker") or sym,
             "request_date": ds,
@@ -72,9 +74,20 @@ class PolygonService:
             "close": float(close_v),
         }
 
+        if volume_v is not None:
+            try:
+                result["volume"] = float(volume_v)
+            except Exception:
+                pass
+        if after_hours_v is not None:
+            try:
+                result["afterHours"] = float(after_hours_v)
+            except Exception:
+                pass
+        if pre_market_v is not None:
+            try:
+                result["preMarket"] = float(pre_market_v)
+            except Exception:
+                pass
 
-def get_stock_ohlc(symbol: str, data_date: Union[str, date]) -> Dict[str, Any]:
-    """
-    Convenience function using a default PolygonService instance.
-    """
-    return PolygonService().get_ohlc(symbol, data_date)
+        return result

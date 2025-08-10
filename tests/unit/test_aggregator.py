@@ -11,7 +11,7 @@ class FakeClock:
 
 class FakePolygon:
     def get_ohlc(self, symbol, data_date):
-        return {"status": "ok", "open": 10, "high": 12, "low": 9, "close": 11}
+        return {"status": "ok", "open": 10, "high": 12, "low": 9, "close": 11, "volume": 1000, "afterHours": 10.5, "preMarket": 10.2}
 
 
 class FakeMW:
@@ -40,6 +40,9 @@ def test_builds_payload_and_caches():
     assert s1.company_code == "AAPL"
     assert s1.purchased_amount == 3
     assert s1.performance_data.five_days == 1.2
+    assert s1.stock_values.volume == 1000
+    assert s1.stock_values.after_hours == 10.5
+    assert s1.stock_values.pre_market == 10.2
 
     s2 = agg.get_stock("AAPL", d)
     assert s2.stock_values.close == 11
@@ -60,6 +63,20 @@ def test_cache_expires_and_refreshes_repo():
 
     s2 = agg.get_stock("AAPL", d)
     assert s2.purchased_amount == 9
+
+
+def test_bypass_cache_flag_refreshes():
+    clock = FakeClock()
+    cache = InMemoryCache(_clock=clock)
+    agg = StockAggregator(polygon=FakePolygon(), marketwatch=FakeMW(), repo=FakeRepo(1), cache=cache, clock=clock)
+    d = date(2025, 8, 7)
+
+    s1 = agg.get_stock("AAPL", d)
+    assert s1.purchased_amount == 1
+
+    agg.repo.amount = 7
+    s2 = agg.get_stock("AAPL", d, bypass_cache=True)
+    assert s2.purchased_amount == 7
 
 
 def test_competitor_mapping_defaults():
