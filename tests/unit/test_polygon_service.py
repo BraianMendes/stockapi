@@ -1,5 +1,7 @@
 import os
 
+import pytest
+
 from app.services.polygon_service import PolygonService
 from app.utils import PolygonError
 
@@ -47,3 +49,33 @@ def test_maps_optional_fields():
     assert d["volume"] == 66084170
     assert d["afterHours"] == 164.4
     assert d["preMarket"] == 165.18
+
+
+def test_polygon_unauthorized_mapping(monkeypatch):
+    monkeypatch.setenv("POLYGON_API_KEY", "key")
+    class FakeHttp:
+        def get_json(self, url, headers=None, params=None, timeout=None):
+            raise Exception("401 Unauthorized")
+    svc = PolygonService(http=FakeHttp())
+    with pytest.raises(PolygonError) as e:
+        svc.get_ohlc("AAPL", "2025-08-07")
+    assert "unauthorized" in str(e.value)
+
+
+def test_polygon_not_found_mapping(monkeypatch):
+    monkeypatch.setenv("POLYGON_API_KEY", "key")
+    class FakeHttp:
+        def get_json(self, url, headers=None, params=None, timeout=None):
+            raise Exception("404 not found")
+    svc = PolygonService(http=FakeHttp())
+    with pytest.raises(PolygonError) as e:
+        svc.get_ohlc("AAPL", "2025-08-07")
+    assert "not_found" in str(e.value)
+
+
+def test_polygon_missing_api_key(monkeypatch):
+    monkeypatch.delenv("POLYGON_API_KEY", raising=False)
+    svc = PolygonService(http=None)
+    with pytest.raises(PolygonError) as e:
+        svc.get_ohlc("AAPL", "2025-08-07")
+    assert "missing_api_key" in str(e.value)

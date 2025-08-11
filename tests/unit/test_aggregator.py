@@ -1,6 +1,30 @@
 from datetime import date, datetime, timedelta
 
+import pytest
+
 from app.services.aggregator import InMemoryCache, StockAggregator
+
+
+class FailingCache:
+    def get(self, key: str):
+        raise RuntimeError("cache down")
+    def set(self, key: str, value, ttl_seconds: int):
+        raise RuntimeError("cache down")
+
+
+class MWAlwaysFails:
+    def get_overview(self, symbol: str, use_cookie: bool = True):
+        raise RuntimeError("mw fail")
+
+
+class RepoRaises:
+    def get_purchased_amount(self, symbol: str) -> int:
+        raise RuntimeError("db fail")
+
+
+class PolyOk:
+    def get_ohlc(self, symbol, data_date):
+        return {"status": "ok", "open": 1, "high": 2, "low": 0.5, "close": 1.5}
 
 
 class FakeClock:
@@ -89,3 +113,28 @@ def test_competitor_mapping_defaults():
     s = agg.get_stock("AAPL", "2025-08-07")
     assert s.competitors[0].name in {"XYZ", "ABC"}
     assert s.competitors[0].market_cap.currency in {"USD", "EUR"}
+
+
+def test_cache_errors_are_ignored_and_fallback_marketwatch():
+    agg = StockAggregator(polygon=PolyOk(), marketwatch=MWAlwaysFails(), repo=RepoRaises(), cache=FailingCache())
+    s = agg.get_stock("AAPL", date(2025, 8, 7), bypass_cache=False)
+    assert s.company_code == "AAPL" and s.company_name == "AAPL"
+    assert agg.last_meta.get("marketwatch_status") == "fallback"
+    assert agg.last_meta.get("cache") == "miss"
+
+
+def test_map_competitors_with_bad_values():
+    class MWComp:
+        def get_overview(self, symbol, use_cookie=True):
+            return {
+                "company_name": symbol,
+                "performance": {},
+                "competitors": [
+                    {"name": "ABC", "market_cap": {"currency": "EUR", "value": "bad"}},
+                    {"symbol": "XYZ"},
+                ],
+            }
+    agg = StockAggregator(polygon=PolyOk(), marketwatch=MWComp(), repo=None, cache=InMemoryCache())
+    s = agg.get_stock("AAPL", date(2025, 8, 7))
+    assert len(s.competitors) == 2
+    assert s.competitors[0].market_cap.value >= 0.0

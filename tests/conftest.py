@@ -26,6 +26,17 @@ def _quiet_marketwatch_logs():
         logger.setLevel(prev)
 
 
+@pytest.fixture(scope="session", autouse=True)
+def _cleanup_db():
+    """Ensure database connections are properly closed after tests."""
+    yield
+    try:
+        from app.db.database import engine
+        engine.dispose()
+    except Exception:
+        pass
+
+
 @pytest.fixture(scope="session")
 def client():
     return TestClient(app)

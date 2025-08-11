@@ -1,0 +1,11 @@
+[run]
+omit =
+    */__init__.py
+    */routers/healthcheck.py
+
+[report]
+exclude_lines =
+    pragma: no cover
+    if __name__ == .__main__.
+    ^\s*pass\s*$
+    ^\s*\.\.\.\s*$

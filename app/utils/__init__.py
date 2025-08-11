@@ -48,7 +48,7 @@ from .value_objects import IsoDate, Money, Percentage, Symbol
 
 RedisCache: Any = None
 try:
-    from .redis_cache import RedisCache as _RedisCache  # type: ignore
+    from .redis_cache import RedisCache as _RedisCache
     RedisCache = _RedisCache
 except Exception:
     RedisCache = None
@@ -97,4 +97,4 @@ __all__ = [
     "infer_symbol",
     "extract_mcap_from_table",
     "extract_mcap_inline",
-]  # type: ignore
+]

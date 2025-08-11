@@ -12,3 +12,4 @@ uvicorn==0.35.0
 pytest==8.3.3
 pytest-sugar
 pytest-rich
+pytest-cov>=4.1.0

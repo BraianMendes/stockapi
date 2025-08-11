@@ -82,7 +82,7 @@ class StockAggregator:
         else:
             redis_url = self.cfg.get_str("REDIS_URL")
             if redis_url and RedisCache is not None:
-                self.cache = RedisCache(url=redis_url, prefix="stocks")  # type: ignore[call-arg]
+                self.cache = RedisCache(url=redis_url, prefix="stocks")
             else:
                 self.cache = InMemoryCache()
 
