@@ -99,11 +99,7 @@ def get_stock(
         response.headers["X-Effective-Date"] = effective_date.isoformat() if effective_date else str(stock.request_data)
         response.headers["X-Date-Policy"] = "previous"
         response.headers["X-Date-Adjustment-Reason"] = reason
-
-        try:
-            _repo.save_snapshot(stock)
-        except Exception:
-            pass
+        
         return stock
     except PolygonError as e:
         msg = str(e).lower()
@@ -176,10 +172,6 @@ def add_purchase(
         _repo.set_purchased_amount(sym, amount)
         stock.purchased_amount = int(amount)
         stock.purchased_status = "purchased" if stock.purchased_amount > 0 else "not_purchased"
-        try:
-            _repo.save_snapshot(stock)
-        except Exception:
-            pass
         _invalidate_symbol_cache(sym)
         return {"message": f"{amount} units of stock {sym} were added to your stock record"}
     except PolygonError as e:

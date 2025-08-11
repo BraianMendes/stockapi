@@ -19,7 +19,7 @@ class SessionFactory(Protocol):
 
 
 class PostgresStockRepository(StockRepository):
-    """Postgres repository for purchases and snapshots."""
+    """Postgres repository for stock purchases."""
 
     def __init__(self, session_factory: SessionFactory) -> None:
         self.session_factory = session_factory
