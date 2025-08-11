@@ -23,7 +23,6 @@ def db_client():
     
     test_repo = PostgresStockRepository(session_factory=SessionLocal)
     
-    # Replace the repository in the router for testing
     stock_router._repo = test_repo
     
     client = TestClient(app)
@@ -39,24 +38,20 @@ class TestDatabasePersistence:
         """Test that repository can store and retrieve purchased amounts."""
         client, repo = db_client
         
-        # Test direct repository usage
         repo.set_purchased_amount("AAPL", 100)
         stored_amount = repo.get_purchased_amount("AAPL")
         assert stored_amount == 100
         
-        # Test different symbol
         repo.set_purchased_amount("MSFT", 50) 
         assert repo.get_purchased_amount("MSFT") == 50
-        assert repo.get_purchased_amount("AAPL") == 100  # Still there
+        assert repo.get_purchased_amount("AAPL") == 100
         
     def test_repository_update_amount(self, db_client):
         """Test that repository can update existing amounts."""
         client, repo = db_client
         
-        # Set initial amount
         repo.set_purchased_amount("GOOGL", 25)
         assert repo.get_purchased_amount("GOOGL") == 25
         
-        # Update amount
         repo.set_purchased_amount("GOOGL", 75)
         assert repo.get_purchased_amount("GOOGL") == 75

@@ -51,7 +51,6 @@ class MockMarketWatchService:
             if use_cookie:
                 raise ScraperError("blocked:403")
             else:
-                # Succeeds without cookie (fallback works)
                 return {
                     "company_name": f"{symbol} Inc.",
                     "performance": {"five_days": 2.5, "one_year": 15.0},
@@ -78,11 +77,9 @@ class MockRepository:
 @pytest.fixture
 def error_client():
     """Create test client for error handling tests."""
-    # Use a simple repository and cache
     test_repo = MockRepository()
     test_cache = InMemoryCache()
     
-    # We'll replace services in individual tests
     stock_router._aggregator.repo = test_repo
     stock_router._aggregator.cache = test_cache
     stock_router._repo = test_repo
@@ -98,13 +95,11 @@ class TestServiceFallback:
         """Test Polygon unauthorized error handling."""
         client = error_client
         
-        # Setup failing Polygon service
         stock_router._aggregator.polygon = MockPolygonService(fail_mode="unauthorized")
         stock_router._aggregator.marketwatch = MockMarketWatchService()
         
         response = client.get("/stock/AAPL")
         
-        # Router uses 502 as default for upstream errors
         assert response.status_code == 502
         response_data = response.json()
         assert "unauthorized" in response_data["detail"]["message"].lower()
@@ -113,13 +108,11 @@ class TestServiceFallback:
         """Test Polygon rate limited error handling."""
         client = error_client
         
-        # Setup rate limited Polygon service
         stock_router._aggregator.polygon = MockPolygonService(fail_mode="rate_limited")
         stock_router._aggregator.marketwatch = MockMarketWatchService()
         
         response = client.get("/stock/AAPL")
         
-        # Router uses 502 as default for upstream errors  
         assert response.status_code == 502
         response_data = response.json()
         assert "rate limited" in response_data["detail"]["message"].lower()
@@ -128,7 +121,6 @@ class TestServiceFallback:
         """Test MarketWatch fallback from cookie to no-cookie."""
         client = error_client
         
-        # Setup services: Polygon works, MarketWatch fails with cookie but works without
         stock_router._aggregator.polygon = MockPolygonService()
         mw_service = MockMarketWatchService(fail_mode="fail_with_cookie")
         stock_router._aggregator.marketwatch = mw_service
@@ -136,7 +128,6 @@ class TestServiceFallback:
         response = client.get("/stock/AAPL")
         
         assert response.status_code == 200
-        # Should have tried twice: once with cookie (failed), once without (succeeded)
         assert mw_service.call_count == 2
         
         data = response.json()
@@ -146,7 +137,6 @@ class TestServiceFallback:
         """Test MarketWatch complete failure results in fallback data."""
         client = error_client
         
-        # Setup services: Polygon works, MarketWatch always fails
         stock_router._aggregator.polygon = MockPolygonService()
         mw_service = MockMarketWatchService(fail_mode="always_fail")
         stock_router._aggregator.marketwatch = mw_service
@@ -154,13 +144,9 @@ class TestServiceFallback:
         response = client.get("/stock/AAPL")
         
         assert response.status_code == 200
-        # Should have tried twice: once with cookie, once without (both failed)
         assert mw_service.call_count == 2
         
         data = response.json()
-        # Should use symbol as company name (fallback)
         assert data["company_name"] == "AAPL"
-        # Should have empty performance and competitors (fallback)
         assert data["performance_data"]["five_days"] == 0.0
-        # Check the correct field name in response
         assert data["Competitors"] == []

@@ -4,26 +4,40 @@ This FastAPI service, built with Python 3.11+, provides a REST API that retrieve
 
 ---
 
+## Requirements
+
+To run this project, you need:
+
+* **Python 3.11+** - [Download from python.org](https://www.python.org/downloads/)
+* **Docker** - [Install from docker.com](https://docs.docker.com/get-docker/)
+* **Make** *(optional)* - [Installation guide](https://www.gnu.org/software/make/)
+
+---
+
 ## Running the API
 
-**With Docker Compose:**
+**Build and run with Docker:**
+
+```bash
+docker build -t stocks-api .
+docker run -p 8000:8000 stocks-api
+```
+
+**Or with Docker Compose:**
 
 ```bash
 docker compose up --build
 ```
 
-Access the interactive docs at: [http://localhost:8000/docs](http://localhost:8000/docs)
-
-**Direct Docker run:**
+**Or using Makefile (simplest):**
 
 ```bash
-docker run -d -p 8000:8000 \
-  --name stocks-api \
-  -e POLYGON_API_KEY=YOUR_KEY \
-  -e DATABASE_URL= \
-  -e REDIS_URL= \
-  stocks-api
+make run
+
+make run-compose
 ```
+
+Access the interactive docs at: [http://localhost:8000/docs](http://localhost:8000/docs)
 
 ---
 
@@ -90,4 +104,5 @@ docker run -d -p 8000:8000 \
 
 - Install: `pip install -r requirements.txt`
 - Run all tests: `python -m pytest`
-- No Docker required (uses in-memory SQLite and mocked externals).
+- No Docker required (uses in-memory SQLite and mocked externals)
+- **Note:** Integration tests require Docker running, otherwise they're skipped
