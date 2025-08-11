@@ -11,8 +11,8 @@ from .polygon_service import PolygonService
 
 
 class StockRepository(Protocol):
-    def get_purchased_amount(self, symbol: str) -> float: ...
-    def set_purchased_amount(self, symbol: str, amount: float) -> None: ...
+    def get_purchased_amount(self, symbol: str) -> int: ...
+    def set_purchased_amount(self, symbol: str, amount: int) -> None: ...
 
 
 class Cache(Protocol):
@@ -204,10 +204,10 @@ class StockAggregator:
     def _to_date(self, s: str) -> date:
         return date.fromisoformat(s)
 
-    def _safe_get_amount(self, symbol: str) -> float:
+    def _safe_get_amount(self, symbol: str) -> int:
         if self.repo is None:
-            return 0.0
+            return 0
         try:
-            return float(self.repo.get_purchased_amount(symbol))
+            return int(self.repo.get_purchased_amount(symbol))
         except Exception:
-            return 0.0
+            return 0

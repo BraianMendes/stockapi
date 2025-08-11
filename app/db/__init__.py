@@ -1,5 +1,5 @@
 from .database import SessionLocal, engine, init_db
-from .models import Base, StockPurchase, StockSnapshot
+from .models import Base, StockPurchase
 
 __all__ = [
     "engine",
@@ -7,5 +7,4 @@ __all__ = [
     "init_db",
     "Base",
     "StockPurchase",
-    "StockSnapshot",
 ]

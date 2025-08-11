@@ -44,7 +44,7 @@ class Stock(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
     status: str = Field(..., description="Overall status")
-    purchased_amount: float = Field(..., description="Purchased amount (can be fractional)")
+    purchased_amount: int = Field(..., description="Purchased amount (integer)")
     purchased_status: str = Field(..., description="Purchased or not_purchased")
     request_data: date = Field(..., description="Request date (YYYY-MM-DD)")
     company_code: str = Field(..., description="Ticker symbol")

@@ -26,17 +26,12 @@ _aggregator = StockAggregator(repo=_repo)
 
 
 class PurchaseBody(BaseModel):
-    amount: float = Field(
+    amount: int = Field(
         ...,
         ge=0,
-        description="Purchased amount (float)",
+        description="Purchased amount (integer)",
         json_schema_extra={"example": 100},
     )
-
-
-class PurchaseBodyWrapper(BaseModel):
-    summary: str | None = None
-    value: PurchaseBody
 
 
 _SYMBOL_RE = re.compile(r"^[A-Z][A-Z0-9\.-]{0,15}$")
@@ -136,13 +131,9 @@ def add_purchase(
         openapi_extra={"example": "AAPL"},
         json_schema_extra={"example": "AAPL"},
     ),
-    body: PurchaseBody | PurchaseBodyWrapper = Body(
+    body: PurchaseBody = Body(
         ...,
-        examples=[
-            {"summary": "Example purchase body", "value": {"amount": 100}},
-            {"summary": "Dell sample", "value": {"amount": 5.0}},
-            {"summary": "HP sample", "value": {"amount": 2.5}},
-        ],
+        examples={"amount": 5},
     ),
     request_date: date | None = Query(
         DEFAULT_DATE,
@@ -166,12 +157,13 @@ def add_purchase(
         effective_date, reason = roll_to_business_day(request_date, policy="previous")
 
     try:
-        amount = float(getattr(body, "amount", getattr(getattr(body, "value", None), "amount", None)))
+        amount = body.amount
+        if not isinstance(amount, int):
+            _http_error(ErrorCode.PURCHASE_ERROR, "Amount must be an integer", http_status=status.HTTP_422_UNPROCESSABLE_ENTITY)
+        if amount < 0:
+            _http_error(ErrorCode.PURCHASE_ERROR, "Amount must be non-negative", http_status=status.HTTP_422_UNPROCESSABLE_ENTITY)
     except Exception:
-        amount = None  
-
-    if amount is None:
-        _http_error(ErrorCode.PURCHASE_ERROR, "Field 'amount' is required", http_status=status.HTTP_422_UNPROCESSABLE_ENTITY)
+        _http_error(ErrorCode.PURCHASE_ERROR, "Field 'amount' is required and must be an integer", http_status=status.HTTP_422_UNPROCESSABLE_ENTITY)
 
     try:
         stock = _aggregator.get_stock(sym, effective_date)
@@ -182,7 +174,7 @@ def add_purchase(
         response.headers["X-Date-Adjustment-Reason"] = reason
 
         _repo.set_purchased_amount(sym, amount)
-        stock.purchased_amount = float(amount)
+        stock.purchased_amount = int(amount)
         stock.purchased_status = "purchased" if stock.purchased_amount > 0 else "not_purchased"
         try:
             _repo.save_snapshot(stock)
