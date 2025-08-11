@@ -1,9 +1,9 @@
 from .stock import (
-    Stock,
-    StockValues,
-    PerformanceData,
     Competitor,
     MarketCap,
+    PerformanceData,
+    Stock,
+    StockValues,
 )
 
 __all__ = [

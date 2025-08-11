@@ -1,12 +1,11 @@
 import json
-from typing import Any, Optional
+from typing import Any
+
 from ..utils import EnvConfig
 
+
 class RedisCache:
-    """
-    Redis-backed cache implementing get/set with TTL.
-    Stores JSON-serialized values.
-    """
+    """Redis-backed cache with JSON values and TTL."""
 
     def __init__(self, url: str | None = None, prefix: str = "stocks", decode_responses: bool = True) -> None:
         try:
@@ -21,7 +20,7 @@ class RedisCache:
     def _k(self, key: str) -> str:
         return f"{self.prefix}:{key}"
 
-    def get(self, key: str) -> Optional[Any]:
+    def get(self, key: str) -> Any | None:
         raw = self.client.get(self._k(key))
         if raw is None:
             return None

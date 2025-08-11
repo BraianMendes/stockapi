@@ -1,5 +1,4 @@
-from . import stock
-from . import healthcheck  
+from . import healthcheck, stock
 
 routers = [
     stock.router,

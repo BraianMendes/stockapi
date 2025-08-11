@@ -1,12 +1,13 @@
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
+
 from ..utils import EnvConfig
 from .models import Base
 
-
 _cfg = EnvConfig()
-_DB_URL = _cfg.get_str("DATABASE_URL", "postgresql+psycopg2://stocks:stocks@localhost:5432/stocks")
+_DB_URL_opt = _cfg.get_str("DATABASE_URL", "postgresql+psycopg2://stocks:stocks@localhost:5432/stocks")
+_DB_URL = _DB_URL_opt or "postgresql+psycopg2://stocks:stocks@localhost:5432/stocks"
 
 if _DB_URL.startswith("sqlite"):
     is_memory = ":memory:" in _DB_URL
@@ -23,7 +24,5 @@ SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, expi
 
 
 def init_db() -> None:
-    """
-    Create tables if not exist (dev-friendly). For prod, prefer Alembic migrations.
-    """
+    """Creates tables if absent (dev use)."""
     Base.metadata.create_all(bind=engine)

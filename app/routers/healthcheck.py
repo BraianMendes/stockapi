@@ -1,9 +1,10 @@
-from datetime import datetime, date, timedelta, UTC
-from typing import Dict, Any
+from datetime import UTC, datetime
+from typing import Any
+
 from fastapi import APIRouter
-from ..services import PolygonService, MarketWatchService
-from ..utils import EnvConfig, PolygonError, ScraperError
-from ..utils.dates import last_business_day
+
+from ..services import MarketWatchService, PolygonService
+from ..utils import EnvConfig, PolygonError, ScraperError, last_business_day
 
 router = APIRouter(tags=["Health"])
 
@@ -13,17 +14,11 @@ mw_svc = MarketWatchService()
 
 
 def check_polygon() -> str:
-    """
-    Verify Polygon Daily Open/Close by fetching OHLC for AAPL.
-    - Try last business day; if data not found, try up to 5 previous business days.
-    - Treat 'no data' (404) as ok_no_data for readiness purposes if API is reachable.
-    """
+    """Checks Polygon by fetching recent AAPL OHLC."""
     start_d = last_business_day()
-    tried = []
     for i in range(0, 5):
         d = start_d if i == 0 else last_business_day(start_d)
         start_d = d
-        tried.append(d.isoformat())
         try:
             _ = polygon_svc.get_ohlc("AAPL", d)
             return "ok"
@@ -44,11 +39,7 @@ def check_polygon() -> str:
 
 
 def check_marketwatch() -> str:
-    """
-    Verify MarketWatch scraping by fetching overview for AAPL.
-    Accept partial responses as healthy enough for readiness.
-    Cookie strategy: try without cookie first; if blocked (401/403), try again with env cookie.
-    """
+    """Checks MarketWatch by scraping AAPL overview."""
     try:
         data = mw_svc.get_overview("AAPL", use_cookie=False)
         perf = data.get("performance") or {}
@@ -76,10 +67,8 @@ def check_marketwatch() -> str:
 
 
 @router.get("/health", summary="Liveness probe")
-def health() -> Dict[str, Any]:
-    """
-    Process up and running.
-    """
+def health() -> dict[str, Any]:
+    """Reports liveness."""
     return {
         "status": "ok",
         "service": "stocks-api",
@@ -88,10 +77,8 @@ def health() -> Dict[str, Any]:
 
 
 @router.get("/ready", summary="Readiness probe")
-def readiness() -> Dict[str, Any]:
-    """
-    Verify external dependencies (Polygon and MarketWatch).
-    """
+def readiness() -> dict[str, Any]:
+    """Reports readiness of external deps."""
     checks = {
         "polygon_api": check_polygon(),
         "marketwatch_api": check_marketwatch(),
@@ -114,10 +101,8 @@ def readiness() -> Dict[str, Any]:
 
 
 @router.get("/debug/env", summary="Debug environment")
-def debug_env() -> Dict[str, Any]:
-    """
-    Show critical environment flags when DEBUG_ENV=true.
-    """
+def debug_env() -> dict[str, Any]:
+    """Shows selective env info when enabled."""
     debug_enabled = (cfg.get_str("DEBUG_ENV", "false") or "false").lower() == "true"
     if not debug_enabled:
         return {"error": "Debug mode not enabled. Set DEBUG_ENV=true to use this endpoint."}
@@ -142,7 +127,5 @@ def debug_env() -> Dict[str, Any]:
 
 @router.get("/ping", summary="Ping")
 def ping() -> str:
-    """
-    Basic echo endpoint.
-    """
+    """Returns 'pong'."""
     return "pong"

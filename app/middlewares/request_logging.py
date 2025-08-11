@@ -1,31 +1,29 @@
 from __future__ import annotations
 
 import time
-from typing import Callable, Iterable, Optional, Set
+from collections.abc import Callable, Iterable
 
 from fastapi import Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.types import ASGIApp
 
-from ..utils import get_logger, set_trace_id, clear_trace_id
+from ..utils import clear_trace_id, get_logger, set_trace_id
 
 
 class RequestLoggingMiddleware(BaseHTTPMiddleware):
-    """
-    Logs each request with a per-request trace_id, response status and latency.
-    """
+    """Logs each request with trace_id, status and latency."""
 
     def __init__(
         self,
         app: ASGIApp,
         *,
-        skip_paths: Optional[Iterable[str]] = None,
+        skip_paths: Iterable[str] | None = None,
         header_trace_key: str = "X-Trace-Id",
     ) -> None:
         super().__init__(app)
         self.log = get_logger("app.middleware.request")
         self.header_trace_key = header_trace_key
-        self.skip: Set[str] = set(skip_paths or (
+        self.skip: set[str] = set(skip_paths or (
             "/health", "/ready", "/docs", "/redoc", "/openapi.json"
         ))
 
@@ -38,12 +36,12 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
 
         start = time.perf_counter()
         status_code = 500
-        response: Optional[Response] = None
+        response: Response | None = None
 
         try:
             response = await call_next(request)
             status_code = response.status_code
-        except Exception as exc:
+        except Exception:
             elapsed_ms = int((time.perf_counter() - start) * 1000)
             self.log.exception(
                 "unhandled exception",

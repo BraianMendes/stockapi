@@ -1,6 +1,7 @@
-import os
-import pytest
 import logging
+import os
+
+import pytest
 
 os.environ["POLYGON_API_KEY"] = os.environ.get("POLYGON_API_KEY", "test-key")
 os.environ["CACHE_TTL_SECONDS"] = os.environ.get("CACHE_TTL_SECONDS", "1")
@@ -10,6 +11,7 @@ os.environ["DATABASE_URL"] = "sqlite+pysqlite:///:memory:"
 os.environ.pop("REDIS_URL", None)
 
 from fastapi.testclient import TestClient
+
 from app.main import app
 
 

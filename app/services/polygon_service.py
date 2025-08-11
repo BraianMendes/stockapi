@@ -1,35 +1,34 @@
-from typing import Dict, Any, Optional, Union
 from datetime import date
+from typing import Any
+
 from ..utils import (
-    HttpClient,
-    HttpClientFactory,
     Config,
     EnvConfig,
+    HttpClient,
+    HttpClientFactory,
     IsoDate,
-    Symbol,
     PolygonError,
+    Symbol,
+    polygon_map_http_error,
+    to_float_or_none,
 )
 
 
 class PolygonService:
-    """
-    Polygon client that fetches and normalizes OHLC for a given symbol and date.
-    """
+    """Client for Polygon Daily Open/Close (OHLC)."""
 
     def __init__(
         self,
-        http: Optional[HttpClient] = None,
-        config: Optional[Config] = None,
+        http: HttpClient | None = None,
+        config: Config | None = None,
         base_url: str = "https://api.polygon.io/v1/open-close",
     ) -> None:
         self.http = http or HttpClientFactory.default()
         self.cfg = config or EnvConfig()
         self.base_url = self.cfg.get_str("POLYGON_BASE_URL", base_url)
 
-    def get_ohlc(self, symbol: str, data_date: Union[str, date]) -> Dict[str, Any]:
-        """
-        Return normalized OHLC for the symbol on the given date.
-        """
+    def get_ohlc(self, symbol: str, data_date: str | date) -> dict[str, Any]:
+        """Returns normalized OHLC for a symbol/date."""
         try:
             api_key = self.cfg.get_str_required("POLYGON_API_KEY")
         except Exception:
@@ -46,18 +45,7 @@ class PolygonService:
         try:
             payload = self.http.get_json(url, headers=None, params=params, timeout=timeout)
         except Exception as e:
-            msg = str(e).lower()
-            if "missing" in msg and "key" in msg:
-                raise PolygonError("missing_api_key")
-            if "401" in msg or "403" in msg or "unauthorized" in msg:
-                raise PolygonError("unauthorized")
-            if "404" in msg or "not found" in msg:
-                raise PolygonError("not_found")
-            if "429" in msg or "too many" in msg:
-                raise PolygonError("rate_limited")
-            if any(code in msg for code in ("500", "502", "503", "504")):
-                raise PolygonError("http_error")
-            raise PolygonError(f"http_error:{str(e)[:80]}")
+            raise polygon_map_http_error(e)
 
         open_v = payload.get("open")
         high_v = payload.get("high")
@@ -67,11 +55,7 @@ class PolygonService:
         if open_v is None or high_v is None or low_v is None or close_v is None:
             raise PolygonError("missing_ohlc_fields")
 
-        volume_v = payload.get("volume")
-        after_hours_v = payload.get("afterHours")
-        pre_market_v = payload.get("preMarket")
-
-        result: Dict[str, Any] = {
+        result: dict[str, Any] = {
             "status": payload.get("status") or "ok",
             "symbol": payload.get("symbol") or payload.get("ticker") or sym,
             "request_date": ds,
@@ -81,20 +65,16 @@ class PolygonService:
             "close": float(close_v),
         }
 
+        volume_v = to_float_or_none(payload.get("volume"))
         if volume_v is not None:
-            try:
-                result["volume"] = float(volume_v)
-            except Exception:
-                pass
+            result["volume"] = volume_v
+
+        after_hours_v = to_float_or_none(payload.get("afterHours"))
         if after_hours_v is not None:
-            try:
-                result["afterHours"] = float(after_hours_v)
-            except Exception:
-                pass
+            result["afterHours"] = after_hours_v
+
+        pre_market_v = to_float_or_none(payload.get("preMarket"))
         if pre_market_v is not None:
-            try:
-                result["preMarket"] = float(pre_market_v)
-            except Exception:
-                pass
+            result["preMarket"] = pre_market_v
 
         return result

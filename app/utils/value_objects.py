@@ -1,7 +1,6 @@
 import re
 from dataclasses import dataclass
 from datetime import date, datetime
-from typing import Tuple, Union
 
 
 @dataclass(frozen=True)
@@ -12,7 +11,7 @@ class IsoDate:
     value: str
 
     @staticmethod
-    def from_any(d: Union[str, date, datetime]) -> "IsoDate":
+    def from_any(d: str | date | datetime) -> "IsoDate":
         if isinstance(d, date) and not isinstance(d, datetime):
             return IsoDate(d.isoformat())
         if isinstance(d, datetime):
@@ -69,6 +68,10 @@ class Money:
             currency = "EUR"
         elif "£" in s:
             currency = "GBP"
+        elif "₩" in s:
+            currency = "KRW"
+        elif "¥" in s:
+            currency = "JPY"
         elif "$" in s:
             currency = "USD"
         numeric, multiplier = _extract_number_and_multiplier(s)
@@ -86,7 +89,7 @@ def _parse_float(text: str):
         return None
 
 
-def _extract_number_and_multiplier(text: str) -> Tuple[float, float]:
+def _extract_number_and_multiplier(text: str) -> tuple[float, float]:
     s_clean = re.sub(r"[^\d\.\-\+KMBTkmbt]", "", str(text or ""))
     m = re.search(r"[+-]?\d+(\.\d+)?", s_clean)
     if not m:

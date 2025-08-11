@@ -1,6 +1,7 @@
-from datetime import datetime, UTC, date
+from datetime import UTC, date, datetime
+
+from sqlalchemy import JSON, Date, DateTime, Float, PrimaryKeyConstraint, String
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
-from sqlalchemy import String, DateTime, Index, JSON, Float
 
 
 class Base(DeclarativeBase):
@@ -16,20 +17,17 @@ class StockPurchase(Base):
 
 
 class StockSnapshot(Base):
-    """
-    Stores full Stock payload snapshots per (symbol, request_date).
-    Uses JSON column (SQLite stores as TEXT under the hood).
-    """
+    """Snapshot of Stock payload per (symbol, date)."""
 
     __tablename__ = "stock_snapshots"
 
-    symbol: Mapped[str] = mapped_column(String(16), primary_key=True)
-    request_date: Mapped[date] = mapped_column(primary_key=True)
+    symbol: Mapped[str] = mapped_column(String(16))
+    request_date: Mapped[date] = mapped_column(Date)
     payload: Mapped[dict] = mapped_column(JSON, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
     )
 
     __table_args__ = (
-        Index("ix_stock_snapshots_symbol_date", "symbol", "request_date"),
+        PrimaryKeyConstraint("symbol", "request_date", name="pk_stock_snapshots"),
     )

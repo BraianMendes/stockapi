@@ -5,23 +5,19 @@ import sys
 import time
 import uuid
 from contextvars import ContextVar
-from typing import Any, Dict, Optional
+from typing import Any
 
 TRACE_ID: ContextVar[str] = ContextVar("trace_id", default="-")
 
 class JsonFormatter(logging.Formatter):
-    """
-    Structured JSON formatter for logs.
-    Fields:
-      ts, level, logger, msg, trace_id, extra (free-form), exc (if any)
-    """
+    """JSON log formatter."""
 
     def __init__(self, *, utc: bool = True) -> None:
         super().__init__()
         self.utc = utc
 
     def format(self, record: logging.LogRecord) -> str:
-        payload: Dict[str, Any] = {
+        payload: dict[str, Any] = {
             "ts": self._timestamp(record.created),
             "level": record.levelname,
             "logger": record.name,
@@ -72,10 +68,7 @@ class JsonFormatter(logging.Formatter):
 
 
 class PlainFormatter(logging.Formatter):
-    """
-    Human-friendly plain formatter:
-    2025-08-08T02:45:00Z INFO app.api - message | trace_id=...
-    """
+    """Plain text log formatter."""
 
     def __init__(self, *, utc: bool = True) -> None:
         dtfmt = "%Y-%m-%dT%H:%M:%SZ" if utc else "%Y-%m-%d %H:%M:%S%z"
@@ -90,9 +83,7 @@ class PlainFormatter(logging.Formatter):
 
 
 class TraceIdFilter(logging.Filter):
-    """
-    Ensures every record has a trace_id attribute from context.
-    """
+    """Adds trace_id to every log record."""
 
     def filter(self, record: logging.LogRecord) -> bool:
         if not hasattr(record, "trace_id"):
@@ -100,54 +91,42 @@ class TraceIdFilter(logging.Filter):
         return True
 
 
-def set_trace_id(value: Optional[str] = None) -> str:
-    """
-    Set (or generate) a correlation id for the current context.
-    """
+def set_trace_id(value: str | None = None) -> str:
+    """Sets (or generates) the current trace id."""
     tid = value or uuid.uuid4().hex
     TRACE_ID.set(tid)
     return tid
 
 
 def clear_trace_id() -> None:
-    """
-    Reset trace id for the current context.
-    """
+    """Clears the current trace id."""
     TRACE_ID.set("-")
 
 
-def get_logger(name: Optional[str] = None) -> logging.Logger:
-    """
-    Get a namespaced logger (do not configure handlers here).
-    """
+def get_logger(name: str | None = None) -> logging.Logger:
+    """Returns a namespaced logger."""
     return logging.getLogger(name or "app")
 
 
 def configure_logging(
     *,
-    level: Optional[str] = None,
-    fmt: Optional[str] = None,
-    utc: Optional[bool] = None,
+    level: str | None = None,
+    fmt: str | None = None,
+    utc: bool | None = None,
     include_uvicorn: bool = True,
 ) -> None:
-    """
-    Configure root logging once for the entire process.
-
-    Env vars:
-      LOG_LEVEL: DEBUG|INFO|WARNING|ERROR (default INFO)
-      LOG_FORMAT: json|plain (default plain)
-      LOG_UTC: true|false (default true)
-    """
-    level_str = (level or os.getenv("LOG_LEVEL", "INFO")).upper()
-    log_level = getattr(logging, level_str, logging.INFO)
-    fmt_str = (fmt or os.getenv("LOG_FORMAT", "plain")).lower()
+    """Configures root logging."""
+    level_value = level if level is not None else (os.getenv("LOG_LEVEL", "INFO") or "INFO")
+    level_str = level_value.upper()
+    fmt_value = fmt if fmt is not None else (os.getenv("LOG_FORMAT", "plain") or "plain")
+    fmt_str = fmt_value.lower()
     use_utc = (os.getenv("LOG_UTC", "true") if utc is None else str(utc)).lower() == "true"
 
     root = logging.getLogger()
     for h in list(root.handlers):
         root.removeHandler(h)
 
-    root.setLevel(log_level)
+    root.setLevel(getattr(logging, level_str, logging.INFO))
 
     handler = logging.StreamHandler(stream=sys.stdout)
     handler.addFilter(TraceIdFilter())
@@ -164,7 +143,7 @@ def configure_logging(
             lg = logging.getLogger(lname)
             lg.handlers = []
             lg.propagate = True
-            lg.setLevel(log_level)
+            lg.setLevel(getattr(logging, level_str, logging.INFO))
 
     log = get_logger("app.boot")
     log.info("logging configured", extra={"level": level_str, "format": fmt_str, "utc": use_utc})

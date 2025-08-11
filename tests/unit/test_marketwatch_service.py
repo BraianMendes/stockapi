@@ -12,7 +12,10 @@ class FakeSession:
         class Resp:
             def __init__(self, status_code, text):
                 self.status_code = status_code
-                self.text = text
+                self._text = text
+            @property
+            def text(self):
+                return self._text
             def raise_for_status(self):
                 if not (200 <= self.status_code < 300):
                     import requests
@@ -65,7 +68,7 @@ def test_local_cache_hits():
 
     svc = MarketWatchService(http=FakeHttp(text=html))
     data1 = svc.get_overview("AAPL", use_cookie=False)
-    data2 = svc.get_overview("AAPL", use_cookie=False)
+    _ = svc.get_overview("AAPL", use_cookie=False)
 
     assert data1["company_name"].startswith("Apple")
     assert svc.http.session.calls == 1

@@ -1,7 +1,9 @@
 import os
+
 from fastapi.testclient import TestClient
-from app.main import app
+
 import app.routers.stock as stock_router
+from app.main import app
 from app.services.aggregator import InMemoryCache
 
 os.environ.setdefault("POLYGON_API_KEY", "test-key")
@@ -77,7 +79,6 @@ def test_get_headers():
     assert r1.headers.get("X-MarketWatch-Status") in {"ok", "fallback", "skipped"}
     assert r1.headers.get("X-MarketWatch-Used-Cookie") in {"true", "false"}
 
-    # Second call should be served from cache (hit)
     r2 = client.get("/stock/AAPL?request_date=2025-08-07")
     assert r2.status_code == 200
     assert r2.headers.get("X-Cache") == "hit"

@@ -1,40 +1,59 @@
-from typing import Optional
-from datetime import date
-from fastapi import APIRouter, HTTPException, Query, status, Path, Body, Response
-from pydantic import BaseModel, Field
 import re
+from datetime import date
+from typing import NoReturn
 
+from fastapi import APIRouter, Body, HTTPException, Path, Query, Response, status
+from pydantic import BaseModel, Field
+
+from ..db import SessionLocal
 from ..models import Stock
-from ..services.aggregator import StockAggregator, InMemoryCache
+from ..services.aggregator import StockAggregator
 from ..services.repository_postgres import PostgresStockRepository
-from ..db.database import SessionLocal
-from ..utils import EnvConfig, RedisCache
-from ..utils.errors import PolygonError
-from ..utils.error_codes import ErrorCode
+from ..utils import (
+    EnvConfig,
+    ErrorCode,
+    PolygonError,
+    RedisCache,
+    is_business_day,
+    last_business_day,
+    roll_to_business_day,
+)
 
-router = APIRouter(prefix="/stock", tags=["Stock"])
+router = APIRouter(prefix="/stock", tags=["Stock"]) 
 
 _repo = PostgresStockRepository(session_factory=SessionLocal)
 _aggregator = StockAggregator(repo=_repo)
 
 
 class PurchaseBody(BaseModel):
-    amount: float = Field(..., ge=0, description="Purchased amount (float)")
+    amount: float = Field(
+        ...,
+        ge=0,
+        description="Purchased amount (float)",
+        json_schema_extra={"example": 100},
+    )
+
+
+class PurchaseBodyWrapper(BaseModel):
+    summary: str | None = None
+    value: PurchaseBody
 
 
 _SYMBOL_RE = re.compile(r"^[A-Z][A-Z0-9\.-]{0,15}$")
 
-TODAY_STR = date.today().isoformat()
+DEFAULT_DATE = last_business_day()
+SWAGGER_DATE_EXAMPLE = "2025-08-05"
 
 
 def _symbol_or_400(symbol: str) -> str:
     sym = str(symbol or "").strip().upper()
     if not _SYMBOL_RE.match(sym):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail={"code": ErrorCode.INVALID_SYMBOL, "message": "Invalid stock symbol"})
+        
     return sym
 
 
-def _http_error(detail_code: ErrorCode | str, message: str, *, http_status: int = status.HTTP_502_BAD_GATEWAY):
+def _http_error(detail_code: ErrorCode | str, message: str, *, http_status: int = status.HTTP_502_BAD_GATEWAY) -> NoReturn:
     code = str(detail_code)
     raise HTTPException(status_code=http_status, detail={"code": code, "message": message})
 
@@ -52,18 +71,40 @@ def get_stock(
     symbol: str = Path(
         ...,
         description="Ticker symbol (path)",
-        example="AAPL",
+        examples=[{"summary": "Example symbol", "value": "AAPL"}],
+        openapi_extra={"example": "AAPL"},
+        json_schema_extra={"example": "AAPL"},
     ),
-    request_date: Optional[date] = Query(
-        None,
+    request_date: date | None = Query(
+        DEFAULT_DATE,
         description="YYYY-MM-DD",
-        example=TODAY_STR,
+        examples=[{"summary": "Example date", "value": SWAGGER_DATE_EXAMPLE}],
+        openapi_extra={"example": SWAGGER_DATE_EXAMPLE},
+        json_schema_extra={"example": SWAGGER_DATE_EXAMPLE},
+    ),
+    strict: bool = Query(
+        False,
+        description="If true, do not adjust non-business dates; return 422",
     ),
 ) -> Stock:
     sym = _symbol_or_400(symbol)
+
+    effective_date: date | None = request_date
+    reason = "none"
+
+    if request_date is not None and not is_business_day(request_date):
+        if strict:
+            _http_error(ErrorCode.INVALID_NON_BUSINESS_DATE, "Requested date is not a business day", http_status=status.HTTP_422_UNPROCESSABLE_ENTITY)
+        effective_date, reason = roll_to_business_day(request_date, policy="previous")
+
     try:
-        stock = _aggregator.get_stock(sym, request_date)
+        stock = _aggregator.get_stock(sym, effective_date)
         _set_meta_headers(response)
+        response.headers["X-Request-Date"] = request_date.isoformat() if request_date else ""
+        response.headers["X-Effective-Date"] = effective_date.isoformat() if effective_date else str(stock.request_data)
+        response.headers["X-Date-Policy"] = "previous"
+        response.headers["X-Date-Adjustment-Reason"] = reason
+
         try:
             _repo.save_snapshot(stock)
         except Exception:
@@ -75,6 +116,8 @@ def get_stock(
             _http_error(ErrorCode.POLYGON_UNAUTHORIZED, "Polygon API unauthorized")
         elif "rate_limited" in msg or "rate" in msg:
             _http_error(ErrorCode.POLYGON_RATE_LIMITED, "Polygon API rate limited")
+        elif "not_found" in msg:
+            _http_error(ErrorCode.MARKET_CLOSED, "No market data for the requested date", http_status=status.HTTP_404_NOT_FOUND)
         else:
             _http_error(ErrorCode.POLYGON_HTTP_ERROR, "Polygon API error")
     except HTTPException:
@@ -89,42 +132,72 @@ def add_purchase(
     symbol: str = Path(
         ...,
         description="Ticker symbol (path)",
-        example="AAPL",
+        examples=[{"summary": "Example symbol", "value": "AAPL"}],
+        openapi_extra={"example": "AAPL"},
+        json_schema_extra={"example": "AAPL"},
     ),
-    body: PurchaseBody = Body(
+    body: PurchaseBody | PurchaseBodyWrapper = Body(
         ...,
-        examples={
-            "default": {"summary": "Example purchase body", "value": {"amount": 10.0}},
-            "dell": {"summary": "Dell sample", "value": {"amount": 5.0}},
-            "hp": {"summary": "HP sample", "value": {"amount": 2.5}},
-        },
+        examples=[
+            {"summary": "Example purchase body", "value": {"amount": 100}},
+            {"summary": "Dell sample", "value": {"amount": 5.0}},
+            {"summary": "HP sample", "value": {"amount": 2.5}},
+        ],
     ),
-    request_date: Optional[date] = Query(
-        None,
+    request_date: date | None = Query(
+        DEFAULT_DATE,
         description="YYYY-MM-DD",
-        example=TODAY_STR,
+        examples=[{"summary": "Example date", "value": SWAGGER_DATE_EXAMPLE}],
+        openapi_extra={"example": SWAGGER_DATE_EXAMPLE},
+        json_schema_extra={"example": SWAGGER_DATE_EXAMPLE},
     ),
-):
+    strict: bool = Query(
+        False,
+        description="If true, do not adjust non-business dates; return 422",
+    ),
+) -> dict:
     sym = _symbol_or_400(symbol)
-    try:
-        stock = _aggregator.get_stock(sym, request_date)
-        _set_meta_headers(response)
 
-        _repo.set_purchased_amount(sym, body.amount)
-        stock.purchased_amount = float(body.amount)
+    effective_date: date | None = request_date
+    reason = "none"
+    if request_date is not None and not is_business_day(request_date):
+        if strict:
+            _http_error(ErrorCode.INVALID_NON_BUSINESS_DATE, "Requested date is not a business day", http_status=status.HTTP_422_UNPROCESSABLE_ENTITY)
+        effective_date, reason = roll_to_business_day(request_date, policy="previous")
+
+    try:
+        amount = float(getattr(body, "amount", getattr(getattr(body, "value", None), "amount", None)))
+    except Exception:
+        amount = None  
+
+    if amount is None:
+        _http_error(ErrorCode.PURCHASE_ERROR, "Field 'amount' is required", http_status=status.HTTP_422_UNPROCESSABLE_ENTITY)
+
+    try:
+        stock = _aggregator.get_stock(sym, effective_date)
+        _set_meta_headers(response)
+        response.headers["X-Request-Date"] = request_date.isoformat() if request_date else ""
+        response.headers["X-Effective-Date"] = effective_date.isoformat() if effective_date else str(stock.request_data)
+        response.headers["X-Date-Policy"] = "previous"
+        response.headers["X-Date-Adjustment-Reason"] = reason
+
+        _repo.set_purchased_amount(sym, amount)
+        stock.purchased_amount = float(amount)
         stock.purchased_status = "purchased" if stock.purchased_amount > 0 else "not_purchased"
         try:
             _repo.save_snapshot(stock)
         except Exception:
             pass
         _invalidate_symbol_cache(sym)
-        return {"message": f"{body.amount} units of stock {sym} were added to your stock record"}
+        return {"message": f"{amount} units of stock {sym} were added to your stock record"}
     except PolygonError as e:
         msg = str(e).lower()
         if "unauthorized" in msg:
             _http_error(ErrorCode.POLYGON_UNAUTHORIZED, "Polygon API unauthorized")
         elif "rate_limited" in msg or "rate" in msg:
             _http_error(ErrorCode.POLYGON_RATE_LIMITED, "Polygon API rate limited")
+        elif "not_found" in msg:
+            _http_error(ErrorCode.MARKET_CLOSED, "No market data for the requested date", http_status=status.HTTP_404_NOT_FOUND)
         else:
             _http_error(ErrorCode.POLYGON_HTTP_ERROR, "Polygon API error")
     except HTTPException:

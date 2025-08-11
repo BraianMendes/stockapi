@@ -1,12 +1,10 @@
 import os
-from typing import Optional, Protocol
+from typing import Protocol
 
 
 class Config(Protocol):
-    """
-    Typed access to configuration values.
-    """
-    def get_str(self, name: str, default: Optional[str] = None) -> Optional[str]:
+    """Typed config interface."""
+    def get_str(self, name: str, default: str | None = None) -> str | None:
         ...
     def get_str_required(self, name: str) -> str:
         ...
@@ -19,10 +17,8 @@ class Config(Protocol):
 
 
 class EnvConfig:
-    """
-    Env-based config implementation.
-    """
-    def get_str(self, name: str, default: Optional[str] = None) -> Optional[str]:
+    """Environment-backed config provider."""
+    def get_str(self, name: str, default: str | None = None) -> str | None:
         val = os.getenv(name)
         return val if val is not None else default
 

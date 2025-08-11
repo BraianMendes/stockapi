@@ -1,14 +1,14 @@
-from pathlib import Path
 from contextlib import asynccontextmanager
-from fastapi import FastAPI
+from pathlib import Path
+
 from dotenv import load_dotenv
+from fastapi import FastAPI
 
-from app.routers.stock import router as stock_router
-from app.routers.healthcheck import router as health_router
-from app.db.database import init_db
-
-from app.utils import configure_logging, get_logger
+from app.db import init_db
 from app.middlewares import RequestLoggingMiddleware
+from app.routers.healthcheck import router as health_router
+from app.routers.stock import router as stock_router
+from app.utils import configure_logging, get_logger
 
 TAGS_METADATA = [
     {
@@ -67,5 +67,5 @@ def index():
         "redoc": "/redoc",
         "health": "/health",
         "ready": "/ready",
-        "stock_example": "/stock/AAPL?request_date=2025-08-07",
+        "stock_example": "/stock/AAPL?request_date=2025-08-05",
     }

@@ -1,5 +1,5 @@
 from datetime import date
-from typing import List, Optional
+
 from pydantic import BaseModel, Field
 from pydantic.config import ConfigDict
 
@@ -25,9 +25,9 @@ class StockValues(BaseModel):
     high: float = Field(..., description="High price")
     low: float = Field(..., description="Low price")
     close: float = Field(..., description="Close price")
-    volume: Optional[float] = Field(None, description="Volume")
-    after_hours: Optional[float] = Field(None, alias="afterHours", description="After-hours price")
-    pre_market: Optional[float] = Field(None, alias="preMarket", description="Pre-market price")
+    volume: float | None = Field(None, description="Volume")
+    after_hours: float | None = Field(None, alias="afterHours", description="After-hours price")
+    pre_market: float | None = Field(None, alias="preMarket", description="Pre-market price")
 
 
 class PerformanceData(BaseModel):
@@ -51,4 +51,4 @@ class Stock(BaseModel):
     company_name: str = Field(..., description="Company name")
     stock_values: StockValues = Field(..., alias="Stock_values", description="OHLC object")
     performance_data: PerformanceData = Field(..., description="Performance object")
-    competitors: List[Competitor] = Field(..., alias="Competitors", description="List of competitors")
+    competitors: list[Competitor] = Field(..., alias="Competitors", description="List of competitors")

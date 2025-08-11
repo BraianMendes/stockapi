@@ -1,5 +1,6 @@
-from datetime import datetime, timedelta, date
-from app.services.aggregator import StockAggregator, InMemoryCache
+from datetime import date, datetime, timedelta
+
+from app.services.aggregator import InMemoryCache, StockAggregator
 
 
 class FakeClock:
