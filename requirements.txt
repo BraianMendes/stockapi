@@ -9,7 +9,7 @@ redis>=5.0
 SQLAlchemy>=2.0
 psycopg2-binary>=2.9
 uvicorn==0.35.0
-pytest==8.3.3
+pytest==9.0.3
 pytest-sugar
 pytest-rich
 pytest-cov>=4.1.0
